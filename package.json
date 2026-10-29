@@ -1,0 +1,19 @@
+{
+  "name": "multicam-webrtc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-Camera 1-on-1 WebRTC Video Call Platform",
+  "scripts": {
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"bgBlue.bold,bgMagenta.bold\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build && npm --prefix server run build",
+    "test": "npm --prefix server run test",
+    "start": "npm --prefix server run start",
+    "start:prod": "npm --prefix server run start:prod",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
