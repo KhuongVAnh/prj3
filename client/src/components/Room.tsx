@@ -305,7 +305,9 @@ export const Room: React.FC<RoomProps> = ({
           onRemoveLocalCamera={handleRemoveLocalCamera}
           peerConnected={isPeerConnected}
           peerName={peerInfo?.peerName}
+          roomId={roomId}
           onOpenCamManager={() => setIsCamManagerOpen(true)}
+          onShareRoom={handleCopyLink}
         />
 
         {/* In-Call Chat Drawer */}

@@ -204,7 +204,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
               autoPlay
               playsInline
               muted
-              className={`w-full h-full object-cover ${
+              className={`w-full h-full object-contain ${
                 !useVirtualCam ? '-scale-x-100' : ''
               } ${!isVideoEnabled && !useVirtualCam ? 'hidden' : 'block'}`}
             />
