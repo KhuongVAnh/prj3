@@ -62,7 +62,9 @@ export const Room: React.FC<RoomProps> = ({
     removeCamera,
     chatMessages,
     sendMessage,
-    stats
+    stats,
+    localQualityModes,
+    sendPinStateUpdate
   } = useWebRTC(roomId, userName);
 
   // Audio level monitoring for local and remote users
@@ -136,12 +138,28 @@ export const Room: React.FC<RoomProps> = ({
   };
 
   const handleTogglePin = (id: string) => {
-    setPinnedId(prev => (prev === id ? null : id));
+    const nextPinnedId = pinnedId === id ? null : id;
+    setPinnedId(nextPinnedId);
+
+    // Xác định ID camera để thông báo đối phương tự động điều chỉnh chất lượng phát
+    if (!nextPinnedId) {
+      sendPinStateUpdate(null);
+    } else {
+      const remoteCam = remoteCameras.find(rc => rc.id === nextPinnedId);
+      if (remoteCam) {
+        // Nếu ghim camera của đối phương: gửi cameraId của đối phương để họ nâng chất lượng camera đó
+        sendPinStateUpdate(remoteCam.cameraId);
+      } else {
+        // Nếu ghim camera của chính máy mình: gửi id để đối phương biết hạ các camera của họ xuống
+        sendPinStateUpdate(nextPinnedId);
+      }
+    }
   };
 
   const handleRemoveLocalCamera = (id: string) => {
     if (pinnedId === id) {
       setPinnedId(null);
+      sendPinStateUpdate(null);
     }
     removeCamera(id);
   };
@@ -275,6 +293,7 @@ export const Room: React.FC<RoomProps> = ({
           isRemoteSpeaking={isRemoteSpeaking}
           isLocalMuted={isMuted}
           pinnedId={pinnedId}
+          localQualityModes={localQualityModes}
           onTogglePin={handleTogglePin}
           onRemoveLocalCamera={handleRemoveLocalCamera}
           peerConnected={isPeerConnected}

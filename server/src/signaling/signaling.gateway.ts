@@ -235,6 +235,25 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   /**
+   * SỰ KIỆN: 'pin-state-update'
+   * Đồng bộ ID camera đang được người xem ghim tiêu điểm (Spotlight Pin)
+   * để bên gửi tự động nâng/hạ chất lượng luồng video phát đi
+   */
+  @SubscribeMessage('pin-state-update')
+  handlePinUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { pinnedCameraId: string | null }
+  ) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId) return;
+
+    client.to(roomId).emit('peer-pin-updated', {
+      peerId: client.id,
+      pinnedCameraId: data?.pinnedCameraId ?? null
+    });
+  }
+
+  /**
    * SỰ KIỆN: 'send-chat'
    * Chuyển phát tin nhắn văn bản tức thời
    */

@@ -59,6 +59,9 @@ export function useWebRTC(roomId: string, userName: string) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [stats, setStats] = useState<WebRTCStats | null>(null);
 
+  // Trạng thái chất lượng phát đi hiện tại của từng camera máy mình: Map cameraId -> 'high' | 'low'
+  const [localQualityModes, setLocalQualityModes] = useState<Record<string, 'high' | 'low'>>({});
+
   /**
    * CÁC THAM CHIẾU (REFS) QUẢN LÝ TÀI NGUYÊN BẤT ĐỒNG BỘ:
    * Giúp truy cập dữ liệu mới nhất trong các hàm callback WebRTC / Socket mà
@@ -81,6 +84,7 @@ export function useWebRTC(roomId: string, userName: string) {
   const isSettingRemoteAnswerPendingRef = useRef<boolean>(false); // Đang chờ áp dụng Remote Answer
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]); // Hàng đợi chứa các gói ICE đến sớm trước khi có Remote Description
   const remoteCameraMetaRef = useRef<CameraMeta[]>([]); // Bảng metadata camera của người bên kia
+  const remotePinnedCameraIdRef = useRef<string | null>(null); // ID camera máy mình mà đối phương đang ghim tiêu điểm
 
   // Giữ cho peerInfoRef luôn đồng bộ giá trị mới nhất
   useEffect(() => {
@@ -232,6 +236,41 @@ export function useWebRTC(roomId: string, userName: string) {
   }, []);
 
   /**
+   * ÁP DỤNG THÔNG SỐ CHẤT LƯỢNG MÃ HÓA (BITRATE / SCALE / FPS) CHO SENDER:
+   * - 'high': Giữ nguyên độ phân giải gốc, 30 FPS, tối đa 2.5 Mbps (Ưu tiên độ nét - Pinned / Full view)
+   * - 'low': Thu nhỏ độ phân giải 2 lần (~360p), 15 FPS, tối đa 300 kbps (Ưu tiên tiết kiệm mạng - Thumbnail)
+   */
+  const applyEncodingQuality = useCallback(async (cameraId: string, mode: 'high' | 'low') => {
+    const sender = cameraSendersRef.current.get(cameraId);
+    if (!sender) return;
+
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+
+      if (mode === 'high') {
+        params.encodings[0].scaleResolutionDownBy = 1.0;
+        params.encodings[0].maxBitrate = 3_500_000;
+        params.encodings[0].maxFramerate = 30;
+        params.degradationPreference = 'maintain-resolution';
+      } else {
+        params.encodings[0].scaleResolutionDownBy = 2.0;
+        params.encodings[0].maxBitrate = 300_000;
+        params.encodings[0].maxFramerate = 15;
+        params.degradationPreference = 'maintain-framerate';
+      }
+
+      await sender.setParameters(params);
+      setLocalQualityModes(prev => ({ ...prev, [cameraId]: mode }));
+      console.log(`[WebRTC Quality] Đã áp dụng chất lượng [${mode.toUpperCase()}] cho camera ${cameraId}`);
+    } catch (err) {
+      console.warn(`[WebRTC Quality] Lỗi khi đổi thông số chất lượng camera ${cameraId}:`, err);
+    }
+  }, []);
+
+  /**
    * BẬT CAMERA VẬT LÝ VỚI THUẬT TOÁN FALLBACK ĐA TẦNG:
    * Giải quyết triệt để lỗi nghẽn băng thông Bus USB 2.0 (NotReadableError)
    * khi kích hoạt đồng thời 2 webcam cắm chung một USB Host Controller.
@@ -243,15 +282,16 @@ export function useWebRTC(roomId: string, userName: string) {
 
       if (deviceId) {
         /**
-         * Thử tuần tự 5 tầng cấu hình (Progressive Constraints Fallback):
-         * - Tầng 1: Đúng deviceId với độ phân giải lý tưởng 720p (1280x720).
-         * - Tầng 2: Đúng deviceId nhưng hạ xuống 480p (640x480) - CỰC KỲ QUAN TRỌNG:
-         *           giúp giảm băng thông bus USB xuống còn ~147 Mbps để mở được camera thứ 2.
-         * - Tầng 3: Hạ xuống 360p (480x360) siêu nhẹ (~82 Mbps).
-         * - Tầng 4: Bỏ giới hạn độ phân giải để camera tự đàm phán nén phần cứng (MJPEG/H.264).
-         * - Tầng 5: Truyền trực tiếp chuỗi deviceId cho các trình duyệt/driver đời cũ.
+         * Thử tuần tự 6 tầng cấu hình (Progressive Constraints Fallback):
+         * - Tầng 1: Đúng deviceId với độ phân giải Full HD 1080p (1920x1080) sắc nét nhất.
+         * - Tầng 2: Hạ xuống 720p (1280x720) nếu camera không hỗ trợ 1080p.
+         * - Tầng 3: Hạ xuống 480p (640x480) - giảm băng thông bus USB xuống còn ~147 Mbps.
+         * - Tầng 4: Hạ xuống 360p (480x360) siêu nhẹ (~82 Mbps).
+         * - Tầng 5: Bỏ giới hạn độ phân giải để camera tự đàm phán nén phần cứng (MJPEG/H.264).
+         * - Tầng 6: Truyền trực tiếp chuỗi deviceId cho các trình duyệt/driver đời cũ.
          */
         const attempts: MediaStreamConstraints[] = [
+          { video: { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
           { video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
           { video: { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
           { video: { deviceId: { exact: deviceId }, width: { ideal: 480 }, height: { ideal: 360 } }, audio: false },
@@ -272,11 +312,11 @@ export function useWebRTC(roomId: string, userName: string) {
           }
         }
 
-        // Nếu cả 5 cấu hình exact đều thất bại, thử sang cấu hình 'ideal' làm phương án cứu cánh cuối cùng
+        // Nếu cả 6 cấu hình exact đều thất bại, thử sang cấu hình 'ideal' làm phương án cứu cánh cuối cùng
         if (!stream) {
           try {
             const fallbackStream = await navigator.mediaDevices.getUserMedia({
-              video: { deviceId: { ideal: deviceId } },
+              video: { deviceId: { ideal: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
               audio: false
             });
             const fallbackTrack = fallbackStream.getVideoTracks()[0];
@@ -303,14 +343,21 @@ export function useWebRTC(roomId: string, userName: string) {
           }
         }
       } else {
-        // Nếu không chỉ định deviceId cụ thể, mở camera mặc định với fallback phân giải
+        // Nếu không chỉ định deviceId cụ thể, mở camera mặc định với fallback phân giải ưu tiên 1080p
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
             audio: false
           });
         } catch (_) {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+              audio: false
+            });
+          } catch (__) {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          }
         }
       }
 
@@ -357,6 +404,9 @@ export function useWebRTC(roomId: string, userName: string) {
       if (pcRef.current) {
         const sender = pcRef.current.addTrack(track, stream);
         cameraSendersRef.current.set(cameraId, sender); // Lưu lại bộ phát để sau này gỡ bỏ khi tắt camera
+        // Khởi tạo chất lượng ban đầu theo trạng thái ghim của đối phương
+        const initialQuality = (!remotePinnedCameraIdRef.current || remotePinnedCameraIdRef.current === cameraId) ? 'high' : 'low';
+        applyEncodingQuality(cameraId, initialQuality);
       }
 
       refreshDevices();
@@ -366,7 +416,7 @@ export function useWebRTC(roomId: string, userName: string) {
       console.error('[Camera] Không thể thêm camera vật lý:', err);
       throw err;
     }
-  }, [broadcastCameraState, refreshDevices]);
+  }, [applyEncodingQuality, broadcastCameraState, refreshDevices]);
 
   /**
    * TẮT MỘT CAMERA (Vật lý hoặc Màn hình):
@@ -393,6 +443,11 @@ export function useWebRTC(roomId: string, userName: string) {
           console.warn('[WebRTC] Lỗi khi gỡ track sender:', e);
         }
         cameraSendersRef.current.delete(cameraId);
+        setLocalQualityModes(prev => {
+          const next = { ...prev };
+          delete next[cameraId];
+          return next;
+        });
       }
     }
 
@@ -432,6 +487,8 @@ export function useWebRTC(roomId: string, userName: string) {
       if (pcRef.current) {
         const sender = pcRef.current.addTrack(track, stream);
         cameraSendersRef.current.set(cameraId, sender);
+        const initialQuality = (!remotePinnedCameraIdRef.current || remotePinnedCameraIdRef.current === cameraId) ? 'high' : 'low';
+        applyEncodingQuality(cameraId, initialQuality);
       }
 
       broadcastCameraState();
@@ -440,7 +497,7 @@ export function useWebRTC(roomId: string, userName: string) {
       console.warn('[ScreenShare] Người dùng hủy hoặc chia sẻ màn hình thất bại:', err);
       return null;
     }
-  }, [broadcastCameraState, removeCamera]);
+  }, [applyEncodingQuality, broadcastCameraState, removeCamera]);
 
   /**
    * Chuyển đổi trạng thái Bật/Tắt một camera theo ID
@@ -456,6 +513,40 @@ export function useWebRTC(roomId: string, userName: string) {
       }
     }
   }, [addPhysicalCamera, removeCamera]);
+
+  /**
+   * XỬ LÝ TÍN HIỆU TIÊU ĐIỂM (PIN) TỪ ĐỐI PHƯƠNG:
+   * - Nếu đối phương ghim 1 camera của mình: Camera đó được nâng lên High, tất cả camera khác của mình hạ xuống Low.
+   * - Nếu đối phương bỏ ghim (null): Tất cả camera của mình tự khôi phục về High (mặc định lưới cân bằng).
+   * - Nếu đối phương ghim camera của chính họ: Tất cả camera của mình hạ xuống Low (vì đối phương đang xem ở thumbnail).
+   */
+  const handleRemotePinUpdate = useCallback((pinnedCameraId: string | null) => {
+    remotePinnedCameraIdRef.current = pinnedCameraId;
+    console.log(`[WebRTC Quality] Đối phương cập nhật ghim camera: ${pinnedCameraId}`);
+
+    localCamerasRef.current.forEach(cam => {
+      if (!pinnedCameraId) {
+        // Không ai bị ghim: Tất cả về High
+        applyEncodingQuality(cam.id, 'high');
+      } else if (cam.id === pinnedCameraId) {
+        // Đúng camera máy mình đang được ghim: Nâng lên High
+        applyEncodingQuality(cam.id, 'high');
+      } else {
+        // Camera không được ghim: Hạ xuống Low để giảm tải bên nhận
+        applyEncodingQuality(cam.id, 'low');
+      }
+    });
+  }, [applyEncodingQuality]);
+
+  /**
+   * Gửi thông báo cho đối phương biết mình đang ghim camera nào để bên đối phương tự điều chỉnh chất lượng phát
+   */
+  const sendPinStateUpdate = useCallback((pinnedCameraId: string | null) => {
+    if (socketRef.current) {
+      console.log(`[Socket] Bắn tín hiệu ghim camera: ${pinnedCameraId}`);
+      socketRef.current.emit('pin-state-update', { pinnedCameraId });
+    }
+  }, []);
 
   /**
    * Gửi tin nhắn văn bản tức thời trong phòng qua Signaling Server
@@ -790,6 +881,12 @@ export function useWebRTC(roomId: string, userName: string) {
       setRemoteCameras(prev => prev.map(rc => ({ ...rc, isMuted: remoteMuted })));
     });
 
+    // Khi đối phương ghim hoặc bỏ ghim một camera (Spotlight Pin-Adaptive Video Quality)
+    socketInstance.on('peer-pin-updated', ({ pinnedCameraId }: { pinnedCameraId: string | null }) => {
+      console.log('[Socket] Nhận sự kiện peer-pin-updated:', pinnedCameraId);
+      handleRemotePinUpdate(pinnedCameraId);
+    });
+
     // Nhận tin nhắn chat
     socketInstance.on('chat-message', (msg: ChatMessage) => {
       setChatMessages(prev => [...prev, msg]);
@@ -878,7 +975,7 @@ export function useWebRTC(roomId: string, userName: string) {
         remoteAudioElemRef.current = null;
       }
     };
-  }, [roomId, userName, getLocalCamerasMeta, updateRemoteCameraMeta]);
+  }, [roomId, userName, getLocalCamerasMeta, updateRemoteCameraMeta, handleRemotePinUpdate]);
 
   return {
     socket,
@@ -901,6 +998,10 @@ export function useWebRTC(roomId: string, userName: string) {
     toggleCamera,
     chatMessages,
     sendMessage,
-    stats
+    stats,
+    // Pin-adaptive quality
+    localQualityModes,
+    sendPinStateUpdate,
+    setCameraQuality: applyEncodingQuality
   };
 }

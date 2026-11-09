@@ -40,6 +40,7 @@ export interface VideoTileProps {
   isSpeaking?: boolean;               // Người này có đang phát ra tiếng nói hay không
   isPinned?: boolean;                 // Khung hình có đang được ghim tiêu điểm hay không
   isThumbnail?: boolean;              // Có phải đang hiển thị ở dải thumbnail thu nhỏ hay không
+  qualityMode?: 'high' | 'low';       // Chế độ chất lượng phát ('high': HD | 'low': 360p tiết kiệm)
   onTogglePin?: (id: string) => void; // Hàm ghim/bỏ ghim
   onRemove?: () => void;              // Hàm đóng luồng camera này (nếu là camera phụ của mình)
   onAspectRatioChange?: (id: string, ratio: number) => void; // Báo cáo tỉ lệ thực tế của video
@@ -57,6 +58,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   isSpeaking = false,
   isPinned = false,
   isThumbnail = false,
+  qualityMode = 'high',
   onTogglePin,
   onRemove,
   onAspectRatioChange,
@@ -225,6 +227,15 @@ export const VideoTile: React.FC<VideoTileProps> = ({
             <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-dark-950/85 backdrop-blur-md border border-white/10 text-[11px] font-medium text-slate-200 pointer-events-auto shadow-sm max-w-[calc(100%-28px)]">
               {getBadgeIcon()}
               <span className="truncate max-w-[90px]">{label}</span>
+              {qualityMode === 'low' ? (
+                <span className="text-[9px] font-mono px-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {resolution && resolution.height > 0 ? `${resolution.height}p` : '360p'}
+                </span>
+              ) : (
+                <span className="text-[9px] font-mono font-bold px-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  {resolution && resolution.width >= 1920 ? '1080p' : 'HD'}
+                </span>
+              )}
             </div>
 
             {isLocal && onRemove && (
@@ -270,6 +281,19 @@ export const VideoTile: React.FC<VideoTileProps> = ({
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono px-1.5 py-0.5 rounded bg-white/5 shrink-0 hidden xs:inline-block">
                 {getBadgeTypeLabel()}
               </span>
+
+              {/* Quality Indicator Badge */}
+              {qualityMode === 'low' ? (
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  {resolution && resolution.height > 0 ? `${resolution.height}p • Tiết kiệm` : '360p • Tiết kiệm'}
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  {resolution && resolution.width >= 1920 ? '1080p FHD' : 'HD'}
+                </span>
+              )}
             </div>
 
             {/* Action Controls */}

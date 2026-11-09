@@ -72,10 +72,17 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
       if (isVideoEnabled || isAudioEnabled) {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: isVideoEnabled ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-            audio: isAudioEnabled
-          });
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: isVideoEnabled ? { width: { ideal: 1920 }, height: { ideal: 1080 } } : false,
+              audio: isAudioEnabled
+            });
+          } catch (_) {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: isVideoEnabled ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+              audio: isAudioEnabled
+            });
+          }
           setPreviewStream(stream);
 
           // Audio meter

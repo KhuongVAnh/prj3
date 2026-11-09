@@ -36,6 +36,7 @@ export interface VideoGridProps {
   isRemoteSpeaking?: boolean;
   isLocalMuted: boolean;
   pinnedId: string | null;
+  localQualityModes?: Record<string, 'high' | 'low'>;
   onTogglePin: (id: string) => void;
   onRemoveLocalCamera: (id: string) => void;
   peerConnected: boolean;
@@ -82,6 +83,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   isRemoteSpeaking = false,
   isLocalMuted,
   pinnedId,
+  localQualityModes,
   onTogglePin,
   onRemoveLocalCamera,
   peerConnected,
@@ -93,6 +95,15 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [streamRatios, setStreamRatios] = useState<Record<string, number>>({});
+
+  // Xác định chế độ chất lượng (HD hay Tiết kiệm) hiển thị trên từng tile
+  const getQuality = useCallback((id: string, isPinnedTile: boolean, isThumbTile: boolean): 'high' | 'low' => {
+    if (isPinnedTile) return 'high';
+    if (isThumbTile) return 'low';
+    if (pinnedId && id !== pinnedId) return 'low';
+    if (localQualityModes && localQualityModes[id]) return localQualityModes[id];
+    return 'high';
+  }, [pinnedId, localQualityModes]);
 
   // Theo dõi chính xác kích thước vùng chứa VideoGrid để tự co giãn tối ưu
   useEffect(() => {
@@ -214,6 +225,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
               isMuted={pinnedStream.isMuted}
               isSpeaking={pinnedStream.isSpeaking}
               isPinned={true}
+              qualityMode={getQuality(pinnedStream.id, true, false)}
               onTogglePin={onTogglePin}
               onRemove={pinnedStream.onRemove}
               onAspectRatioChange={handleAspectRatioChange}
@@ -249,6 +261,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 isMuted={pinnedStream.isMuted}
                 isSpeaking={pinnedStream.isSpeaking}
                 isPinned={true}
+                qualityMode={getQuality(pinnedStream.id, true, false)}
                 onTogglePin={onTogglePin}
                 onRemove={pinnedStream.onRemove}
                 onAspectRatioChange={handleAspectRatioChange}
@@ -282,6 +295,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                     isSpeaking={item.isSpeaking}
                     isPinned={false}
                     isThumbnail={true}
+                    qualityMode={getQuality(item.id, false, true)}
                     onTogglePin={onTogglePin}
                     onRemove={item.onRemove}
                     onAspectRatioChange={handleAspectRatioChange}
@@ -313,6 +327,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 isMuted={pinnedStream.isMuted}
                 isSpeaking={pinnedStream.isSpeaking}
                 isPinned={true}
+                qualityMode={getQuality(pinnedStream.id, true, false)}
                 onTogglePin={onTogglePin}
                 onRemove={pinnedStream.onRemove}
                 onAspectRatioChange={handleAspectRatioChange}
@@ -346,6 +361,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                     isSpeaking={item.isSpeaking}
                     isPinned={false}
                     isThumbnail={true}
+                    qualityMode={getQuality(item.id, false, true)}
                     onTogglePin={onTogglePin}
                     onRemove={item.onRemove}
                     onAspectRatioChange={handleAspectRatioChange}
@@ -379,6 +395,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
             isMuted={single.isMuted}
             isSpeaking={single.isSpeaking}
             isPinned={false}
+            qualityMode={getQuality(single.id, false, false)}
             onTogglePin={onTogglePin}
             onRemove={single.onRemove}
             onAspectRatioChange={handleAspectRatioChange}
@@ -426,6 +443,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 isMuted={item.isMuted}
                 isSpeaking={item.isSpeaking}
                 isPinned={false}
+                qualityMode={getQuality(item.id, false, false)}
                 onTogglePin={onTogglePin}
                 onRemove={item.onRemove}
                 onAspectRatioChange={handleAspectRatioChange}
@@ -471,6 +489,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   isMuted={item.isMuted}
                   isSpeaking={item.isSpeaking}
                   isPinned={false}
+                  qualityMode={getQuality(item.id, false, false)}
                   onTogglePin={onTogglePin}
                   onRemove={item.onRemove}
                   onAspectRatioChange={handleAspectRatioChange}
@@ -510,6 +529,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   isMuted={item.isMuted}
                   isSpeaking={item.isSpeaking}
                   isPinned={false}
+                  qualityMode={getQuality(item.id, false, false)}
                   onTogglePin={onTogglePin}
                   onRemove={item.onRemove}
                   onAspectRatioChange={handleAspectRatioChange}
@@ -540,6 +560,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   isMuted={item.isMuted}
                   isSpeaking={item.isSpeaking}
                   isPinned={false}
+                  qualityMode={getQuality(item.id, false, false)}
                   onTogglePin={onTogglePin}
                   onRemove={item.onRemove}
                   onAspectRatioChange={handleAspectRatioChange}
@@ -585,6 +606,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                     isMuted={item.isMuted}
                     isSpeaking={item.isSpeaking}
                     isPinned={false}
+                    qualityMode={getQuality(item.id, false, false)}
                     onTogglePin={onTogglePin}
                     onRemove={item.onRemove}
                     onAspectRatioChange={handleAspectRatioChange}
@@ -615,6 +637,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                     isMuted={item.isMuted}
                     isSpeaking={item.isSpeaking}
                     isPinned={false}
+                    qualityMode={getQuality(item.id, false, false)}
                     onTogglePin={onTogglePin}
                     onRemove={item.onRemove}
                     onAspectRatioChange={handleAspectRatioChange}
@@ -655,6 +678,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                         isMuted={item.isMuted}
                         isSpeaking={item.isSpeaking}
                         isPinned={false}
+                        qualityMode={getQuality(item.id, false, false)}
                         onTogglePin={onTogglePin}
                         onRemove={item.onRemove}
                         onAspectRatioChange={handleAspectRatioChange}
@@ -687,6 +711,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 isMuted={item.isMuted}
                 isSpeaking={item.isSpeaking}
                 isPinned={false}
+                qualityMode={getQuality(item.id, false, false)}
                 onTogglePin={onTogglePin}
                 onRemove={item.onRemove}
                 onAspectRatioChange={handleAspectRatioChange}
