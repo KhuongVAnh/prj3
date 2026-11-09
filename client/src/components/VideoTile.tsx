@@ -24,7 +24,6 @@ import {
   X,
   MicOff,
   Video,
-  Sparkles,
   Monitor,
   Radio,
   Scaling
@@ -34,9 +33,9 @@ import { CameraType } from '../types';
 export interface VideoTileProps {
   id: string;                         // ID duy nhất của stream
   stream: MediaStream;                // Luồng video MediaStream
-  label: string;                      // Nhãn tên hiển thị (vd: "Bạn: Facecam", "Bob: SMPTE Clock")
+  label: string;                      // Nhãn tên hiển thị (vd: "Bạn: Facecam", "Bob: Webcam")
   isLocal: boolean;                   // Luồng này là của máy mình hay nhận từ đối phương
-  type: CameraType;                   // 'physical' | 'virtual' | 'screen'
+  type: CameraType;                   // 'physical' | 'screen'
   isMuted?: boolean;                  // Người này có đang tắt mic hay không
   isSpeaking?: boolean;               // Người này có đang phát ra tiếng nói hay không
   isPinned?: boolean;                 // Khung hình có đang được ghim tiêu điểm hay không
@@ -160,8 +159,6 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
   const getBadgeIcon = () => {
     switch (type) {
-      case 'virtual':
-        return <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
       case 'screen':
         return <Monitor className="w-3.5 h-3.5 text-sky-400 shrink-0" />;
       default:
@@ -171,8 +168,6 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
   const getBadgeTypeLabel = () => {
     switch (type) {
-      case 'virtual':
-        return 'Virtual Stream';
       case 'screen':
         return 'Screen Feed';
       default:

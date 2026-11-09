@@ -113,11 +113,11 @@ async function runSignalingTest() {
     // -------------------------------------------------------------
     // [Test 4] Alice activates 2 cameras simultaneously
     // -------------------------------------------------------------
-    console.log('[Test 4] Alice activates 2 cameras (Physical Webcam + Studio Clock Simulator)...');
+    console.log('[Test 4] Alice activates 2 cameras (Physical Webcam 1 + Physical Webcam 2)...');
     await new Promise<void>((resolve, reject) => {
       const aliceCameras = [
         { id: 'physical-cam-1', label: 'Facecam HD', type: 'physical' },
-        { id: 'virtual-clock', label: 'Studio Clock [Virtual]', type: 'virtual' }
+        { id: 'physical-cam-2', label: 'Desk Cam HD', type: 'physical' }
       ];
 
       bob.on('peer-camera-updated', (data) => {

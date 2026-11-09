@@ -7,23 +7,21 @@
 /**
  * Phân loại nguồn cấp video:
  * - 'physical': Camera vật lý phần cứng gắn qua USB hoặc webcam tích hợp laptop
- * - 'virtual': Camera mô phỏng sinh từ HTML5 Canvas (SMPTE Clock, Blueprint, Radar)
  * - 'screen': Luồng chia sẻ màn hình máy tính (getDisplayMedia)
  */
-export type CameraType = 'physical' | 'virtual' | 'screen';
+export type CameraType = 'physical' | 'screen';
 
 /**
  * Nguồn camera cục bộ (Local Camera):
  * Đại diện cho một luồng video đang được phát từ phía máy của người dùng.
  */
 export interface CameraSource {
-  id: string;                                          // Định danh duy nhất (vd: 'physical-devId123', 'virtual-clock')
+  id: string;                                          // Định danh duy nhất (vd: 'physical-devId123')
   deviceId?: string;                                   // Hardware deviceId từ navigator.mediaDevices.enumerateDevices()
   label: string;                                       // Tên hiển thị (vd: 'Arducam 12MP', 'Integrated Webcam')
   type: CameraType;                                    // Loại camera
   stream: MediaStream;                                 // Luồng MediaStream chứa VideoTrack thực tế
   active: boolean;                                     // Trạng thái đang phát (ON AIR)
-  virtualPattern?: 'clock' | 'blueprint' | 'radar';    // Mẫu camera ảo (nếu là virtual)
 }
 
 /**
@@ -35,8 +33,8 @@ export interface RemoteCameraStream {
   cameraId: string;                // Camera ID của đối phương tương ứng
   peerId: string;                  // Socket ID của người gửi
   peerName: string;                // Tên của người gửi
-  label: string;                   // Nhãn tên camera (vd: 'Bob: Studio Clock')
-  type: CameraType;                // Loại camera ('physical' | 'virtual' | 'screen')
+  label: string;                   // Nhãn tên camera (vd: 'Bob: Camera')
+  type: CameraType;                // Loại camera ('physical' | 'screen')
   stream: MediaStream;             // Luồng video nhận về để gán vào thẻ <video>
   isMuted?: boolean;               // Trạng thái mic của đối phương
 }

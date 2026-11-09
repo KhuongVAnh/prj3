@@ -31,7 +31,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { CameraSource, RemoteCameraStream, CameraMeta, PeerInfo, ChatMessage, WebRTCStats } from '../types';
-import { createVirtualCameraStream, VirtualCamInstance } from '../utils/virtualCamera';
 import { ICE_SERVERS } from '../constants/webrtc';
 
 export function useWebRTC(roomId: string, userName: string) {
@@ -72,7 +71,6 @@ export function useWebRTC(roomId: string, userName: string) {
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const audioSenderRef = useRef<RTCRtpSender | null>(null); // Quản lý bộ phát âm thanh (Microphone)
   const cameraSendersRef = useRef<Map<string, RTCRtpSender>>(new Map()); // Quản lý các bộ phát video: Map cameraId -> RTCRtpSender
-  const virtualCamInstancesRef = useRef<Map<string, VirtualCamInstance>>(new Map()); // Bộ nhớ lưu các vòng lặp vẽ Canvas camera ảo
   const remoteAudioElemRef = useRef<HTMLAudioElement | null>(null);
   const peerInfoRef = useRef<PeerInfo | null>(null);
 
@@ -371,54 +369,7 @@ export function useWebRTC(roomId: string, userName: string) {
   }, [broadcastCameraState, refreshDevices]);
 
   /**
-   * BẬT CAMERA MÔ PHỎNG ẢO (VIRTUAL STUDIO CAMERA):
-   * Sử dụng HTML5 Canvas render hoạt ảnh đồ họa toán học 30 FPS rồi gọi canvas.captureStream(30).
-   * Rất hữu ích khi máy tính chỉ có 1 webcam hoặc để kiểm thử tải đa luồng.
-   */
-  const addVirtualCamera = useCallback((pattern: 'clock' | 'blueprint' | 'radar') => {
-    const patternLabels: Record<string, string> = {
-      clock: 'Studio SMPTE Clock [Virtual]',
-      blueprint: 'Desk Blueprint [Virtual]',
-      radar: 'Radar Scanner [Virtual]'
-    };
-    const cameraId = `virtual-${pattern}`;
-
-    // Tránh bật trùng mẫu camera ảo đã có
-    const exists = localCamerasRef.current.find(c => c.id === cameraId);
-    if (exists) {
-      return exists;
-    }
-
-    // Khởi tạo luồng canvas ảo và lưu instance quản lý vòng lặp vẽ
-    const instance = createVirtualCameraStream(pattern);
-    virtualCamInstancesRef.current.set(cameraId, instance);
-
-    const track = instance.stream.getVideoTracks()[0];
-    const newCam: CameraSource = {
-      id: cameraId,
-      label: patternLabels[pattern] || 'Virtual Camera',
-      type: 'virtual',
-      stream: instance.stream,
-      active: true,
-      virtualPattern: pattern
-    };
-
-    // Cập nhật danh sách camera cục bộ
-    localCamerasRef.current = [...localCamerasRef.current, newCam];
-    setLocalCameras(localCamerasRef.current);
-
-    // Nạp track của camera ảo vào RTCPeerConnection
-    if (pcRef.current) {
-      const sender = pcRef.current.addTrack(track, instance.stream);
-      cameraSendersRef.current.set(cameraId, sender);
-    }
-
-    broadcastCameraState();
-    return newCam;
-  }, [broadcastCameraState]);
-
-  /**
-   * TẮT MỘT CAMERA (Vật lý, Ảo, hoặc Màn hình):
+   * TẮT MỘT CAMERA (Vật lý hoặc Màn hình):
    * Gỡ bỏ RTCRtpSender tương ứng ra khỏi RTCPeerConnection và giải phóng tài nguyên phần cứng.
    */
   const removeCamera = useCallback((cameraId: string) => {
@@ -428,18 +379,11 @@ export function useWebRTC(roomId: string, userName: string) {
       target.stream.getTracks().forEach(t => t.stop());
     }
 
-    // 2. Hủy vòng lặp animation nếu là camera ảo
-    const vInst = virtualCamInstancesRef.current.get(cameraId);
-    if (vInst) {
-      vInst.stop();
-      virtualCamInstancesRef.current.delete(cameraId);
-    }
-
-    // 3. Cập nhật danh sách camera cục bộ
+    // 2. Cập nhật danh sách camera cục bộ
     localCamerasRef.current = localCamerasRef.current.filter(c => c.id !== cameraId);
     setLocalCameras(localCamerasRef.current);
 
-    // 4. Gỡ bỏ bộ phát (Sender) ra khỏi RTCPeerConnection (Kích hoạt onnegotiationneeded để đối phương xóa ô video)
+    // 3. Gỡ bỏ bộ phát (Sender) ra khỏi RTCPeerConnection (Kích hoạt onnegotiationneeded để đối phương xóa ô video)
     if (pcRef.current) {
       const sender = cameraSendersRef.current.get(cameraId);
       if (sender) {
@@ -509,12 +453,9 @@ export function useWebRTC(roomId: string, userName: string) {
       if (cameraId.startsWith('physical-')) {
         const devId = cameraId.replace('physical-', '');
         await addPhysicalCamera(devId);
-      } else if (cameraId.startsWith('virtual-')) {
-        const pat = cameraId.replace('virtual-', '') as 'clock' | 'blueprint' | 'radar';
-        addVirtualCamera(pat);
       }
     }
-  }, [addPhysicalCamera, addVirtualCamera, removeCamera]);
+  }, [addPhysicalCamera, removeCamera]);
 
   /**
    * Gửi tin nhắn văn bản tức thời trong phòng qua Signaling Server
@@ -924,9 +865,6 @@ export function useWebRTC(roomId: string, userName: string) {
         pcRef.current.close();
         pcRef.current = null;
       }
-      // Dừng toàn bộ các instance vẽ camera ảo
-      virtualCamInstancesRef.current.forEach(v => v.stop());
-      virtualCamInstancesRef.current.clear();
       // Tắt tất cả các track webcam để tắt đèn camera
       localCamerasRef.current.forEach(cam => cam.stream.getTracks().forEach(t => t.stop()));
       localCamerasRef.current = [];
@@ -958,7 +896,6 @@ export function useWebRTC(roomId: string, userName: string) {
     availableVideoDevices,
     refreshDevices,
     addPhysicalCamera,
-    addVirtualCamera,
     addScreenShare,
     removeCamera,
     toggleCamera,

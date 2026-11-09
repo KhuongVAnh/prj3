@@ -16,7 +16,6 @@ interface JoinConfig {
   userName: string;
   initialAudio: boolean;
   initialVideo: boolean;
-  useVirtualCam: boolean;
 }
 
 export function App() {
@@ -36,8 +35,7 @@ export function App() {
     roomId: string,
     userName: string,
     initialAudio: boolean,
-    initialVideo: boolean,
-    useVirtualCam: boolean
+    initialVideo: boolean
   ) => {
     // Update URL query without full page refresh
     const url = new URL(window.location.href);
@@ -49,8 +47,7 @@ export function App() {
       roomId,
       userName,
       initialAudio,
-      initialVideo,
-      useVirtualCam
+      initialVideo
     });
   };
 
@@ -67,7 +64,6 @@ export function App() {
           userName={currentConfig.userName}
           initialAudio={currentConfig.initialAudio}
           initialVideo={currentConfig.initialVideo}
-          useVirtualCam={currentConfig.useVirtualCam}
           onLeaveRoom={handleLeaveRoom}
         />
       ) : (

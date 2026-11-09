@@ -13,18 +13,17 @@
 /**
  * Phân loại nguồn camera:
  * - 'physical': Camera vật lý phần cứng (Webcam laptop, camera USB ngoài, DroidCam/Iriun)
- * - 'virtual': Camera mô phỏng bằng HTML5 Canvas phục vụ test và demo
  * - 'screen': Luồng chia sẻ màn hình máy tính (Screen Share)
  */
-export type CameraType = 'physical' | 'virtual' | 'screen';
+export type CameraType = 'physical' | 'screen';
 
 /**
  * Thông tin chi tiết của một luồng camera được phát từ phía client:
  */
 export interface CameraInfo {
-  id: string;                      // Định danh duy nhất của camera trên client (vd: physical-xxx, virtual-clock)
-  label: string;                   // Tên hiển thị của camera (vd: "Integrated Webcam", "Studio Clock")
-  type: CameraType;                // Loại camera ('physical' | 'virtual' | 'screen')
+  id: string;                      // Định danh duy nhất của camera trên client (vd: physical-xxx)
+  label: string;                   // Tên hiển thị của camera (vd: "Integrated Webcam")
+  type: CameraType;                // Loại camera ('physical' | 'screen')
   trackId?: string;                // ID của MediaStreamTrack truyền qua WebRTC
   streamId?: string;               // ID của MediaStream truyền qua WebRTC
 }

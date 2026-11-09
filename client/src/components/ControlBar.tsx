@@ -24,8 +24,7 @@ import {
   MessageSquare,
   Activity,
   PhoneOff,
-  Share2,
-  Sparkles
+  Share2
 } from 'lucide-react';
 import { CameraSource } from '../types';
 
@@ -35,7 +34,6 @@ interface ControlBarProps {
   localCameras: CameraSource[];
   onTogglePrimaryCamera: () => void;
   onOpenCamManager: () => void;
-  onQuickAddVirtualCam: () => void;
   onToggleScreenShare: () => void;
   isScreenSharing: boolean;
   onToggleChat: () => void;
@@ -53,7 +51,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   localCameras,
   onTogglePrimaryCamera,
   onOpenCamManager,
-  onQuickAddVirtualCam,
   onToggleScreenShare,
   isScreenSharing,
   onToggleChat,
@@ -111,15 +108,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           <span className="px-1.5 py-0.5 rounded-full bg-slate-950/30 text-[10px] font-mono">
             {activeCameraCount}
           </span>
-        </button>
-
-        {/* Quick Virtual Cam Shortcut */}
-        <button
-          onClick={onQuickAddVirtualCam}
-          title="Quick Add Studio Virtual Camera"
-          className="p-3.5 rounded-full bg-white/5 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all hidden md:flex items-center justify-center"
-        >
-          <Sparkles className="w-5 h-5" />
         </button>
 
         {/* Screen Share */}

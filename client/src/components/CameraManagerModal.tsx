@@ -18,12 +18,8 @@ import { CameraSource } from '../types';
 import {
   X,
   Camera,
-  Sparkles,
   Monitor,
   RefreshCw,
-  Clock,
-  Compass,
-  Radar,
   CheckCircle2,
   AlertCircle,
   Loader2,
@@ -36,7 +32,6 @@ interface CameraManagerModalProps {
   availableDevices: MediaDeviceInfo[];
   activeCameras: CameraSource[];
   onTogglePhysicalCamera: (deviceId: string) => Promise<void>;
-  onToggleVirtualCamera: (pattern: 'clock' | 'blueprint' | 'radar') => void;
   onToggleScreenShare: () => Promise<void>;
   onRefreshDevices: () => Promise<MediaDeviceInfo[]>;
 }
@@ -47,7 +42,6 @@ export const CameraManagerModal: React.FC<CameraManagerModalProps> = ({
   availableDevices,
   activeCameras,
   onTogglePhysicalCamera,
-  onToggleVirtualCamera,
   onToggleScreenShare,
   onRefreshDevices
 }) => {
@@ -59,11 +53,6 @@ export const CameraManagerModal: React.FC<CameraManagerModalProps> = ({
   // Kiểm tra xem camera vật lý có đang hoạt động hay không
   const isPhysicalActive = (deviceId: string) => {
     return activeCameras.some(c => c.deviceId === deviceId || c.id === `physical-${deviceId}`);
-  };
-
-  // Kiểm tra xem camera ảo có đang hoạt động hay không
-  const isVirtualActive = (pattern: string) => {
-    return activeCameras.some(c => c.id === `virtual-${pattern}`);
   };
 
   // Kiểm tra trạng thái chia sẻ màn hình
@@ -82,7 +71,7 @@ export const CameraManagerModal: React.FC<CameraManagerModalProps> = ({
 
       if (err?.name === 'NotReadableError' || details.includes('Could not start video source') || details.includes('xung đột phần cứng')) {
         message = 'Xung đột phần cứng USB hoặc camera đang bị ứng dụng khác chiếm (NotReadableError).';
-        details = 'Nguyên nhân phổ biến: 1. Hai camera cùng dùng chip USB Sonix làm nghẽn băng thông USB 2.0; 2. Camera đang mở trong ứng dụng khác (Zoom, Teams, Zalo, Windows Camera). Giải pháp: Cắm camera USB sang cổng USB 3.0 (màu xanh), hoặc dùng Camera ảo bên dưới.';
+        details = 'Nguyên nhân phổ biến: 1. Hai camera cùng dùng chip USB Sonix làm nghẽn băng thông USB 2.0; 2. Camera đang mở trong ứng dụng khác (Zoom, Teams, Zalo, Windows Camera). Giải pháp: Cắm camera USB sang cổng USB 3.0 (màu xanh), hoặc đóng các app đang chiếm camera.';
       } else if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
         message = 'Quyền truy cập camera bị từ chối.';
         details = 'Vui lòng kiểm tra cài đặt quyền camera trên trình duyệt.';
@@ -170,10 +159,7 @@ export const CameraManagerModal: React.FC<CameraManagerModalProps> = ({
 
             {availableDevices.length === 0 ? (
               <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-center">
-                <p className="text-xs text-slate-400 mb-2">Chưa phát hiện webcam phần cứng nào.</p>
-                <p className="text-xs text-slate-500">
-                  Bạn có thể sử dụng các Camera ảo mô phỏng bên dưới để thử nghiệm tính năng phát đa luồng ngay lập tức!
-                </p>
+                <p className="text-xs text-slate-400">Chưa phát hiện webcam phần cứng nào. Vui lòng kiểm tra lại kết nối thiết bị.</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -231,170 +217,50 @@ export const CameraManagerModal: React.FC<CameraManagerModalProps> = ({
                 })}
               </div>
             )}
-
-            {availableDevices.length === 1 && (
-              <div className="mt-3 flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300/90 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
-                <span>
-                  <strong>Mẹo:</strong> Máy của bạn chỉ có 1 webcam vật lý. Bạn có thể bật thêm các <strong>Camera ảo mô phỏng</strong> bên dưới để trải nghiệm truyền nhiều góc camera cùng lúc!
-                </span>
-              </div>
-            )}
           </div>
 
-          {/* Phần 2: Các nguồn Camera Ảo mô phỏng (Virtual Simulated Cameras) */}
+          {/* Phần 2: Nguồn Chia Sẻ Màn Hình */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                Camera Mô Phỏng Ảo (Mở nhanh nhiều góc camera)
+                <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+                Chia Sẻ Màn Hình
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Mẫu 1: Studio SMPTE Clock */}
-              <div
-                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
-                  isVirtualActive('clock')
-                    ? 'bg-brand-500/10 border-brand-500/30 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)]'
-                    : 'bg-dark-850/50 border-white/5 hover:border-white/10'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                      <Clock className="w-4 h-4" />
-                    </div>
-                    {isVirtualActive('clock') && (
-                      <span className="text-[10px] font-mono text-brand-400 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded-full">
-                        ĐANG PHÁT
-                      </span>
-                    )}
+            <div
+              className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
+                isScreenShareActive
+                  ? 'bg-indigo-500/10 border-indigo-500/30 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]'
+                  : 'bg-dark-850/50 border-white/5 hover:border-white/10'
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                    <Monitor className="w-4 h-4" />
                   </div>
-                  <h4 className="text-sm font-semibold text-slate-200">Đồng hồ Studio SMPTE</h4>
-                  <p className="text-xs text-slate-400 mt-1 mb-3">
-                    Đồng hồ kỹ thuật số chuẩn phòng thu hiển thị mili-giây, dải màu truyền hình và sóng âm dao động.
-                  </p>
+                  {isScreenShareActive && (
+                    <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
+                      ĐANG PHÁT
+                    </span>
+                  )}
                 </div>
-                <button
-                  onClick={() => onToggleVirtualCamera('clock')}
-                  className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${
-                    isVirtualActive('clock')
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30'
-                      : 'bg-white/10 hover:bg-white/20 text-slate-200'
-                  }`}
-                >
-                  {isVirtualActive('clock') ? 'Dừng phát' : 'Bật luồng này'}
-                </button>
+                <h4 className="text-sm font-semibold text-slate-200">Chia Sẻ Màn Hình</h4>
+                <p className="text-xs text-slate-400 mt-1 mb-3">
+                  Chia sẻ cửa sổ, tab trình duyệt hoặc toàn bộ màn hình desktop như một kênh video riêng.
+                </p>
               </div>
-
-              {/* Mẫu 2: Blueprint / Desk Simulator */}
-              <div
-                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
-                  isVirtualActive('blueprint')
-                    ? 'bg-sky-500/10 border-sky-500/30 shadow-[0_0_15px_-3px_rgba(56,189,248,0.2)]'
-                    : 'bg-dark-850/50 border-white/5 hover:border-white/10'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
-                      <Compass className="w-4 h-4" />
-                    </div>
-                    {isVirtualActive('blueprint') && (
-                      <span className="text-[10px] font-mono text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
-                        ĐANG PHÁT
-                      </span>
-                    )}
-                  </div>
-                  <h4 className="text-sm font-semibold text-slate-200">Bản Vẽ Bàn Làm Việc (CAD)</h4>
-                  <p className="text-xs text-slate-400 mt-1 mb-3">
-                    Mô phỏng camera tài liệu chiếu bàn với lưới CAD, la bàn đo góc xoay liên tục và tọa độ.
-                  </p>
-                </div>
-                <button
-                  onClick={() => onToggleVirtualCamera('blueprint')}
-                  className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${
-                    isVirtualActive('blueprint')
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30'
-                      : 'bg-white/10 hover:bg-white/20 text-slate-200'
-                  }`}
-                >
-                  {isVirtualActive('blueprint') ? 'Dừng phát' : 'Bật luồng này'}
-                </button>
-              </div>
-
-              {/* Mẫu 3: Radar Scanner */}
-              <div
-                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
-                  isVirtualActive('radar')
-                    ? 'bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)]'
-                    : 'bg-dark-850/50 border-white/5 hover:border-white/10'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                      <Radar className="w-4 h-4" />
-                    </div>
-                    {isVirtualActive('radar') && (
-                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                        ĐANG PHÁT
-                      </span>
-                    )}
-                  </div>
-                  <h4 className="text-sm font-semibold text-slate-200">Radar Quét Cảm Biến</h4>
-                  <p className="text-xs text-slate-400 mt-1 mb-3">
-                    Mô phỏng radar quét 360 độ phát hiện mục tiêu và hiển thị thông số viễn trắc tọa độ.
-                  </p>
-                </div>
-                <button
-                  onClick={() => onToggleVirtualCamera('radar')}
-                  className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${
-                    isVirtualActive('radar')
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30'
-                      : 'bg-white/10 hover:bg-white/20 text-slate-200'
-                  }`}
-                >
-                  {isVirtualActive('radar') ? 'Dừng phát' : 'Bật luồng này'}
-                </button>
-              </div>
-
-              {/* Chia sẻ màn hình như một góc camera */}
-              <div
-                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
+              <button
+                onClick={() => onToggleScreenShare()}
+                className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${
                   isScreenShareActive
-                    ? 'bg-indigo-500/10 border-indigo-500/30 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]'
-                    : 'bg-dark-850/50 border-white/5 hover:border-white/10'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30'
+                    : 'bg-white/10 hover:bg-white/20 text-slate-200'
                 }`}
               >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                      <Monitor className="w-4 h-4" />
-                    </div>
-                    {isScreenShareActive && (
-                      <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
-                        ĐANG PHÁT
-                      </span>
-                    )}
-                  </div>
-                  <h4 className="text-sm font-semibold text-slate-200">Chia Sẻ Màn Hình</h4>
-                  <p className="text-xs text-slate-400 mt-1 mb-3">
-                    Chia sẻ cửa sổ, tab trình duyệt hoặc toàn bộ màn hình desktop như một kênh video riêng.
-                  </p>
-                </div>
-                <button
-                  onClick={() => onToggleScreenShare()}
-                  className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${
-                    isScreenShareActive
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30'
-                      : 'bg-white/10 hover:bg-white/20 text-slate-200'
-                  }`}
-                >
-                  {isScreenShareActive ? 'Dừng chia sẻ' : 'Bật chia sẻ màn hình'}
-                </button>
-              </div>
+                {isScreenShareActive ? 'Dừng chia sẻ' : 'Bật chia sẻ màn hình'}
+              </button>
             </div>
           </div>
         </div>

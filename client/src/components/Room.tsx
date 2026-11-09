@@ -32,7 +32,6 @@ interface RoomProps {
   userName: string;
   initialAudio: boolean;
   initialVideo: boolean;
-  useVirtualCam: boolean;
   onLeaveRoom: () => void;
 }
 
@@ -41,7 +40,6 @@ export const Room: React.FC<RoomProps> = ({
   userName,
   initialAudio,
   initialVideo,
-  useVirtualCam,
   onLeaveRoom
 }) => {
   const {
@@ -60,7 +58,6 @@ export const Room: React.FC<RoomProps> = ({
     availableVideoDevices,
     refreshDevices,
     addPhysicalCamera,
-    addVirtualCamera,
     addScreenShare,
     removeCamera,
     chatMessages,
@@ -109,16 +106,13 @@ export const Room: React.FC<RoomProps> = ({
         await initAudio();
       }
 
-      if (useVirtualCam) {
-        addVirtualCamera('clock');
-      } else if (initialVideo) {
+      if (initialVideo) {
         try {
           // Explicitly pass the first detected camera device ID so it maps cleanly to hardware
           const firstDeviceId = devices && devices.length > 0 ? devices[0].deviceId : undefined;
           await addPhysicalCamera(firstDeviceId);
         } catch (err) {
-          console.warn('[Room] Falling back to virtual camera as physical webcam is unavailable:', err);
-          addVirtualCamera('clock');
+          console.warn('[Room] Không thể mở webcam vật lý:', err);
         }
       }
     };
@@ -160,18 +154,8 @@ export const Room: React.FC<RoomProps> = ({
       try {
         await addPhysicalCamera();
       } catch (e) {
-        addVirtualCamera('clock');
+        console.warn('[Room] Lỗi khi bật lại camera chính:', e);
       }
-    }
-  };
-
-  const handleQuickAddVirtualCam = () => {
-    // If clock virtual cam is already running, toggle blueprint, otherwise add clock
-    const hasClock = localCameras.some(c => c.id === 'virtual-clock');
-    if (hasClock) {
-      addVirtualCamera('blueprint');
-    } else {
-      addVirtualCamera('clock');
     }
   };
 
@@ -183,16 +167,6 @@ export const Room: React.FC<RoomProps> = ({
       if (target) handleRemoveLocalCamera(target.id);
     } else {
       await addPhysicalCamera(deviceId);
-    }
-  };
-
-  const handleToggleVirtualCameraInModal = (pattern: 'clock' | 'blueprint' | 'radar') => {
-    const cameraId = `virtual-${pattern}`;
-    const exists = localCameras.some(c => c.id === cameraId);
-    if (exists) {
-      handleRemoveLocalCamera(cameraId);
-    } else {
-      addVirtualCamera(pattern);
     }
   };
 
@@ -327,7 +301,6 @@ export const Room: React.FC<RoomProps> = ({
         localCameras={localCameras}
         onTogglePrimaryCamera={handleTogglePrimaryCamera}
         onOpenCamManager={() => setIsCamManagerOpen(true)}
-        onQuickAddVirtualCam={handleQuickAddVirtualCam}
         onToggleScreenShare={handleToggleScreenShareInModal}
         isScreenSharing={localCameras.some(c => c.type === 'screen')}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}
@@ -346,7 +319,6 @@ export const Room: React.FC<RoomProps> = ({
         availableDevices={availableVideoDevices}
         activeCameras={localCameras}
         onTogglePhysicalCamera={handleTogglePhysicalCameraInModal}
-        onToggleVirtualCamera={handleToggleVirtualCameraInModal}
         onToggleScreenShare={handleToggleScreenShareInModal}
         onRefreshDevices={refreshDevices}
       />

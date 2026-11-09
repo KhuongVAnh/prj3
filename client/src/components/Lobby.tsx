@@ -16,17 +16,15 @@ import {
   Mic,
   MicOff,
   ArrowRight,
-  Sparkles,
   Layers,
   Shield,
   Zap,
   Users
 } from 'lucide-react';
-import { createVirtualCameraStream, VirtualCamInstance } from '../utils/virtualCamera';
 
 interface LobbyProps {
   initialRoomId: string;
-  onJoinRoom: (roomId: string, userName: string, initialAudio: boolean, initialVideo: boolean, useVirtualCam: boolean) => void;
+  onJoinRoom: (roomId: string, userName: string, initialAudio: boolean, initialVideo: boolean) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
@@ -34,12 +32,10 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
   const [userName, setUserName] = useState('');
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [useVirtualCam, setUseVirtualCam] = useState(false);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const virtualInstRef = useRef<VirtualCamInstance | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
   // Initialize random default name if empty
@@ -70,20 +66,11 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
     const setupPreview = async () => {
       // Cleanup previous
-      if (virtualInstRef.current) {
-        virtualInstRef.current.stop();
-        virtualInstRef.current = null;
-      }
       if (previewStream) {
         previewStream.getTracks().forEach(t => t.stop());
       }
 
-      if (useVirtualCam) {
-        const vInst = createVirtualCameraStream('clock');
-        virtualInstRef.current = vInst;
-        stream = vInst.stream;
-        setPreviewStream(stream);
-      } else if (isVideoEnabled || isAudioEnabled) {
+      if (isVideoEnabled || isAudioEnabled) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: isVideoEnabled ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
@@ -113,9 +100,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
             animFrameRef.current = requestAnimationFrame(updateMeter);
           }
         } catch (e) {
-          console.warn('[Lobby] Camera/mic access fallback:', e);
-          // If physical webcam is blocked or unavailable, automatically offer virtual cam
-          setUseVirtualCam(true);
+          console.warn('[Lobby] Camera/mic access error:', e);
         }
       } else {
         setPreviewStream(null);
@@ -132,14 +117,11 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
       if (audioCtx && audioCtx.state !== 'closed') {
         try { audioCtx.close(); } catch (_) {}
       }
-      if (virtualInstRef.current) {
-        virtualInstRef.current.stop();
-      }
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
       }
     };
-  }, [isVideoEnabled, isAudioEnabled, useVirtualCam]);
+  }, [isVideoEnabled, isAudioEnabled]);
 
   // Bind video element
   useEffect(() => {
@@ -158,11 +140,8 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     if (previewStream) {
       previewStream.getTracks().forEach(t => t.stop());
     }
-    if (virtualInstRef.current) {
-      virtualInstRef.current.stop();
-    }
 
-    onJoinRoom(finalRoom, finalName, isAudioEnabled, isVideoEnabled, useVirtualCam);
+    onJoinRoom(finalRoom, finalName, isAudioEnabled, isVideoEnabled);
   };
 
   const handleCreateNewRoom = () => {
@@ -204,13 +183,11 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
               autoPlay
               playsInline
               muted
-              className={`w-full h-full object-contain ${
-                !useVirtualCam ? '-scale-x-100' : ''
-              } ${!isVideoEnabled && !useVirtualCam ? 'hidden' : 'block'}`}
+              className={`w-full h-full object-contain -scale-x-100 ${!isVideoEnabled ? 'hidden' : 'block'}`}
             />
 
             {/* Video off placeholder */}
-            {!isVideoEnabled && !useVirtualCam && (
+            {!isVideoEnabled && (
               <div className="w-full h-full flex flex-col items-center justify-center bg-dark-900">
                 <div className="w-20 h-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 mb-3">
                   <VideoOff className="w-8 h-8" />
@@ -223,17 +200,8 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
             {/* Top badges */}
             <div className="absolute top-4 left-4 flex items-center gap-2">
               <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-dark-950/80 backdrop-blur-md border border-white/10 text-xs font-semibold text-slate-200">
-                {useVirtualCam ? (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Studio Clock [Virtual Preview]</span>
-                  </>
-                ) : (
-                  <>
-                    <Video className="w-3.5 h-3.5 text-brand-400" />
-                    <span>Webcam Preview</span>
-                  </>
-                )}
+                <Video className="w-3.5 h-3.5 text-brand-400" />
+                <span>Webcam Preview</span>
               </span>
             </div>
 
@@ -268,34 +236,15 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
             </button>
 
             <button
-              onClick={() => {
-                if (useVirtualCam) {
-                  setUseVirtualCam(false);
-                  setIsVideoEnabled(true);
-                } else {
-                  setIsVideoEnabled(!isVideoEnabled);
-                }
-              }}
+              onClick={() => setIsVideoEnabled(!isVideoEnabled)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all ${
-                isVideoEnabled && !useVirtualCam
+                isVideoEnabled
                   ? 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/15'
                   : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
               }`}
             >
-              {isVideoEnabled && !useVirtualCam ? <Video className="w-4 h-4 text-brand-400" /> : <VideoOff className="w-4 h-4" />}
-              <span>{isVideoEnabled && !useVirtualCam ? 'Webcam Active' : 'Webcam Off'}</span>
-            </button>
-
-            <button
-              onClick={() => setUseVirtualCam(!useVirtualCam)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all ${
-                useVirtualCam
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                  : 'bg-white/5 text-slate-300 border-white/5 hover:bg-white/10'
-              }`}
-            >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>{useVirtualCam ? 'Using Virtual Cam' : 'Preview Virtual Cam'}</span>
+              {isVideoEnabled ? <Video className="w-4 h-4 text-brand-400" /> : <VideoOff className="w-4 h-4" />}
+              <span>{isVideoEnabled ? 'Webcam Active' : 'Webcam Off'}</span>
             </button>
           </div>
         </div>
@@ -369,8 +318,8 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
                 <span>Simultaneous Multi-Cam</span>
               </div>
               <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-brand-400 shrink-0" />
-                <span>Simulated Virtual Feeds</span>
+                <Shield className="w-4 h-4 text-brand-400 shrink-0" />
+                <span>HD Physical Feeds</span>
               </div>
               <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4 text-brand-400 shrink-0" />
