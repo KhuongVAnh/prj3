@@ -25,8 +25,18 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CameraSource, RemoteCameraStream, VideoQualityMode } from '../types';
+import {
+  CameraSource,
+  RemoteCameraStream,
+  VideoQualityMode,
+  WhiteboardLiveDraw,
+  WhiteboardPoint,
+  WhiteboardState,
+  WhiteboardStroke,
+  WhiteboardTool
+} from '../types';
 import { VideoTile } from './VideoTile';
+import { WhiteboardTile } from './WhiteboardTile';
 import { Video, UserPlus, Sparkles } from 'lucide-react';
 
 export interface VideoGridProps {
@@ -44,7 +54,40 @@ export interface VideoGridProps {
   roomId?: string;
   onOpenCamManager?: () => void;
   onShareRoom?: () => void;
+  // Whiteboard props (hiển thị như ô thứ 5 ngang hàng với các camera)
+  whiteboardState?: WhiteboardState;
+  isWhiteboardOwner?: boolean;
+  onCloseWhiteboard?: () => void;
+  onWhiteboardLiveDraw?: (payload: {
+    strokeId: string;
+    tool: WhiteboardTool;
+    color: string;
+    size: number;
+    points: WhiteboardPoint[];
+  }) => void;
+  onWhiteboardCommitStroke?: (stroke: Omit<WhiteboardStroke, 'authorId' | 'authorName'>) => void;
+  onWhiteboardUndo?: () => void;
+  onWhiteboardClear?: () => void;
+  onWhiteboardToggleGrid?: () => void;
+  registerWhiteboardLiveHandler?: (handler: ((draw: WhiteboardLiveDraw) => void) | null) => void;
 }
+
+type GridItem =
+  | {
+      kind: 'video';
+      id: string;
+      stream: MediaStream;
+      label: string;
+      isLocal: boolean;
+      type: CameraSource['type'];
+      isMuted?: boolean;
+      isSpeaking: boolean;
+      onRemove?: () => void;
+    }
+  | {
+      kind: 'whiteboard';
+      id: 'whiteboard';
+    };
 
 /**
  * Tính toán kích thước tối đa vừa vặn vùng chứa theo tỉ lệ ratio cho trước (mặc định 16:9)
@@ -90,7 +133,16 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   peerName = 'Peer',
   roomId,
   onOpenCamManager,
-  onShareRoom
+  onShareRoom,
+  whiteboardState,
+  isWhiteboardOwner = false,
+  onCloseWhiteboard,
+  onWhiteboardLiveDraw,
+  onWhiteboardCommitStroke,
+  onWhiteboardUndo,
+  onWhiteboardClear,
+  onWhiteboardToggleGrid,
+  registerWhiteboardLiveHandler
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -132,41 +184,119 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     });
   }, []);
 
-  // Hợp nhất danh sách tất cả các luồng camera đang hoạt động
-  const allStreams = useMemo(() => [
-    ...localCameras.map(cam => ({
-      id: cam.id,
-      stream: cam.stream,
-      label: cam.label,
-      isLocal: true,
-      type: cam.type,
-      isMuted: isLocalMuted,
-      isSpeaking: isLocalSpeaking,
-      onRemove: () => onRemoveLocalCamera(cam.id)
-    })),
-    ...remoteCameras.map(cam => ({
-      id: cam.id,
-      stream: cam.stream,
-      label: `${peerName}: ${cam.label}`,
-      isLocal: false,
-      type: cam.type,
-      isMuted: cam.isMuted,
-      isSpeaking: isRemoteSpeaking && !cam.isMuted,
-      onRemove: undefined
-    }))
-  ], [localCameras, remoteCameras, isLocalMuted, isLocalSpeaking, isRemoteSpeaking, peerName, onRemoveLocalCamera]);
+  // Hợp nhất danh sách tất cả các luồng camera + Bảng trắng (nếu đang mở)
+  const allStreams = useMemo<GridItem[]>(() => {
+    const items: GridItem[] = [
+      ...localCameras.map(cam => ({
+        kind: 'video' as const,
+        id: cam.id,
+        stream: cam.stream,
+        label: cam.label,
+        isLocal: true,
+        type: cam.type,
+        isMuted: isLocalMuted,
+        isSpeaking: isLocalSpeaking,
+        onRemove: () => onRemoveLocalCamera(cam.id)
+      })),
+      ...remoteCameras.map(cam => ({
+        kind: 'video' as const,
+        id: cam.id,
+        stream: cam.stream,
+        label: `${peerName}: ${cam.label}`,
+        isLocal: false,
+        type: cam.type,
+        isMuted: cam.isMuted,
+        isSpeaking: isRemoteSpeaking && !cam.isMuted,
+        onRemove: undefined
+      }))
+    ];
 
-  // Hàm xác định tỉ lệ khung hình cho một stream cụ thể
-  const getStreamRatio = useCallback((id: string, stream: MediaStream): number => {
-    if (streamRatios[id]) return streamRatios[id];
-    const fromTrack = getTrackAspectRatio(stream);
-    if (fromTrack) return fromTrack;
-    return 16 / 9;
-  }, [streamRatios]);
+    if (whiteboardState?.isOpen) {
+      items.push({ kind: 'whiteboard', id: 'whiteboard' });
+    }
+    return items;
+  }, [
+    localCameras,
+    remoteCameras,
+    isLocalMuted,
+    isLocalSpeaking,
+    isRemoteSpeaking,
+    peerName,
+    onRemoveLocalCamera,
+    whiteboardState?.isOpen
+  ]);
+
+  // Hàm xác định tỉ lệ khung hình cho một item (Bảng trắng luôn chuẩn 16:9)
+  const getItemRatio = useCallback(
+    (item: GridItem): number => {
+      if (item.kind === 'whiteboard') return 16 / 9;
+      if (streamRatios[item.id]) return streamRatios[item.id];
+      const fromTrack = getTrackAspectRatio(item.stream);
+      if (fromTrack) return fromTrack;
+      return 16 / 9;
+    },
+    [streamRatios]
+  );
 
   // Kiểm tra luồng đang được ghim tiêu điểm
   const pinnedStream = pinnedId ? allStreams.find(s => s.id === pinnedId) : null;
   const secondaryStreams = pinnedStream ? allStreams.filter(s => s.id !== pinnedId) : [];
+
+  const renderTile = (
+    item: GridItem,
+    opts: {
+      isPinned: boolean;
+      isThumbnail: boolean;
+      className?: string;
+      style?: React.CSSProperties;
+    }
+  ) => {
+    if (item.kind === 'whiteboard') {
+      return (
+        <WhiteboardTile
+          key={item.id}
+          roomId={roomId}
+          strokes={whiteboardState?.strokes || []}
+          showGrid={Boolean(whiteboardState?.showGrid)}
+          ownerName={whiteboardState?.ownerName || null}
+          isOwner={isWhiteboardOwner}
+          isPinned={opts.isPinned}
+          isThumbnail={opts.isThumbnail}
+          onTogglePin={onTogglePin}
+          onCloseWhiteboard={onCloseWhiteboard}
+          onLiveDraw={onWhiteboardLiveDraw || (() => {})}
+          onCommitStroke={onWhiteboardCommitStroke || (() => {})}
+          onUndo={onWhiteboardUndo || (() => {})}
+          onClear={onWhiteboardClear || (() => {})}
+          onToggleGrid={onWhiteboardToggleGrid || (() => {})}
+          registerLiveHandler={registerWhiteboardLiveHandler || (() => {})}
+          className={opts.className}
+          style={opts.style}
+        />
+      );
+    }
+
+    return (
+      <VideoTile
+        key={item.id}
+        id={item.id}
+        stream={item.stream}
+        label={item.label}
+        isLocal={item.isLocal}
+        type={item.type}
+        isMuted={item.isMuted}
+        isSpeaking={item.isSpeaking}
+        isPinned={opts.isPinned}
+        isThumbnail={opts.isThumbnail}
+        qualityMode={getQuality(item.id, opts.isPinned, opts.isThumbnail)}
+        onTogglePin={onTogglePin}
+        onRemove={item.onRemove}
+        onAspectRatioChange={handleAspectRatioChange}
+        className={opts.className}
+        style={opts.style}
+      />
+    );
+  };
 
   const { width: availW, height: availH } = dimensions;
   const gap = 16;
@@ -204,76 +334,58 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       );
     }
 
+    // Helper render 1 ô vào wrapper cố định kích thước
+    const renderSizedSlot = (item: GridItem, target: { width: number; height: number }, fallbackAspect = '16/9') => (
+      <div
+        key={item.id}
+        style={
+          hasDimensions
+            ? { width: `${target.width}px`, height: `${target.height}px` }
+            : { aspectRatio: fallbackAspect, maxWidth: '100%', maxHeight: '100%' }
+        }
+        className="shrink-0 flex items-center justify-center"
+      >
+        {renderTile(item, { isPinned: false, isThumbnail: false, className: 'w-full h-full' })}
+      </div>
+    );
+
     // ------------------------------------------------------------------------
-    // [CHẾ ĐỘ TIÊU ĐIỂM (SPOTLIGHT / PIN MODE)]: Ghim 1 camera làm màn hình chính
+    // [CHẾ ĐỘ TIÊU ĐIỂM (SPOTLIGHT / PIN MODE)]: Ghim 1 camera hoặc Bảng trắng
     // ------------------------------------------------------------------------
     if (pinnedStream) {
-      const pinnedRatio = getStreamRatio(pinnedStream.id, pinnedStream.stream);
+      const pinnedRatio = getItemRatio(pinnedStream);
 
-      // Nếu chỉ có 1 camera duy nhất và camera đó đang được ghim
       if (secondaryStreams.length === 0) {
         const target = fitBox(availW, availH, pinnedRatio);
         return (
           <div className="flex-1 w-full h-full min-h-0 flex items-center justify-center overflow-hidden">
-            <VideoTile
-              key={pinnedStream.id}
-              id={pinnedStream.id}
-              stream={pinnedStream.stream}
-              label={pinnedStream.label}
-              isLocal={pinnedStream.isLocal}
-              type={pinnedStream.type}
-              isMuted={pinnedStream.isMuted}
-              isSpeaking={pinnedStream.isSpeaking}
-              isPinned={true}
-              qualityMode={getQuality(pinnedStream.id, true, false)}
-              onTogglePin={onTogglePin}
-              onRemove={pinnedStream.onRemove}
-              onAspectRatioChange={handleAspectRatioChange}
-              style={
-                hasDimensions
-                  ? { width: `${target.width}px`, height: `${target.height}px` }
-                  : { aspectRatio: `${pinnedRatio}`, maxWidth: '100%', maxHeight: '100%' }
-              }
-            />
+            {renderTile(pinnedStream, {
+              isPinned: true,
+              isThumbnail: false,
+              style: hasDimensions
+                ? { width: `${target.width}px`, height: `${target.height}px` }
+                : { aspectRatio: `${pinnedRatio}`, maxWidth: '100%', maxHeight: '100%' }
+            })}
           </div>
         );
       }
 
-      // Khi có thêm camera phụ:
-      // Màn hình ngang (Desktop / Landscape): Cột chính bên trái, dải thumbnail dọc bên phải
       if (availW >= 800 && isLandscape) {
         const sidebarW = Math.min(280, Math.max(190, Math.floor(availW * 0.22)));
-        const mainAvailW = availW - sidebarW - gap;
-        const mainAvailH = availH;
-        const mainSize = fitBox(mainAvailW, mainAvailH, pinnedRatio);
+        const mainSize = fitBox(availW - sidebarW - gap, availH, pinnedRatio);
 
         return (
           <div className="flex-1 w-full h-full min-h-0 flex flex-row items-center justify-center gap-4 overflow-hidden">
-            {/* Màn hình chính ghim tiêu điểm */}
             <div className="flex-1 h-full min-h-0 flex items-center justify-center">
-              <VideoTile
-                key={pinnedStream.id}
-                id={pinnedStream.id}
-                stream={pinnedStream.stream}
-                label={pinnedStream.label}
-                isLocal={pinnedStream.isLocal}
-                type={pinnedStream.type}
-                isMuted={pinnedStream.isMuted}
-                isSpeaking={pinnedStream.isSpeaking}
-                isPinned={true}
-                qualityMode={getQuality(pinnedStream.id, true, false)}
-                onTogglePin={onTogglePin}
-                onRemove={pinnedStream.onRemove}
-                onAspectRatioChange={handleAspectRatioChange}
-                style={
-                  hasDimensions
-                    ? { width: `${mainSize.width}px`, height: `${mainSize.height}px` }
-                    : { aspectRatio: `${pinnedRatio}`, maxWidth: '100%', maxHeight: '100%' }
-                }
-              />
+              {renderTile(pinnedStream, {
+                isPinned: true,
+                isThumbnail: false,
+                style: hasDimensions
+                  ? { width: `${mainSize.width}px`, height: `${mainSize.height}px` }
+                  : { aspectRatio: `${pinnedRatio}`, maxWidth: '100%', maxHeight: '100%' }
+              })}
             </div>
 
-            {/* Dải thumbnail phụ bên phải */}
             <div
               style={{ width: `${sidebarW}px` }}
               className="h-full shrink-0 flex flex-col gap-3 overflow-y-auto pr-1 py-1"
@@ -282,64 +394,31 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 <div
                   key={item.id}
                   onClick={() => onTogglePin(item.id)}
-                  title="Nhấp để chuyển tiêu điểm sang camera này"
+                  title="Nhấp để chuyển tiêu điểm sang khung này"
                   className="w-full aspect-video shrink-0 rounded-2xl overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-brand-500/60 shadow-md"
                 >
-                  <VideoTile
-                    id={item.id}
-                    stream={item.stream}
-                    label={item.label}
-                    isLocal={item.isLocal}
-                    type={item.type}
-                    isMuted={item.isMuted}
-                    isSpeaking={item.isSpeaking}
-                    isPinned={false}
-                    isThumbnail={true}
-                    qualityMode={getQuality(item.id, false, true)}
-                    onTogglePin={onTogglePin}
-                    onRemove={item.onRemove}
-                    onAspectRatioChange={handleAspectRatioChange}
-                    className="w-full h-full"
-                  />
+                  {renderTile(item, { isPinned: false, isThumbnail: true, className: 'w-full h-full' })}
                 </div>
               ))}
             </div>
           </div>
         );
       } else {
-        // Màn hình hẹp / dọc (Mobile / Portrait): Màn hình chính ở trên, dải thumbnail cuộn ngang ở dưới
         const stripH = Math.min(120, Math.max(85, Math.floor(availH * 0.2)));
-        const mainAvailW = availW;
-        const mainAvailH = availH - stripH - gap;
-        const mainSize = fitBox(mainAvailW, mainAvailH, pinnedRatio);
+        const mainSize = fitBox(availW, availH - stripH - gap, pinnedRatio);
 
         return (
           <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-between gap-3 overflow-hidden">
-            {/* Màn hình chính ghim tiêu điểm */}
             <div className="flex-1 w-full min-h-0 flex items-center justify-center">
-              <VideoTile
-                key={pinnedStream.id}
-                id={pinnedStream.id}
-                stream={pinnedStream.stream}
-                label={pinnedStream.label}
-                isLocal={pinnedStream.isLocal}
-                type={pinnedStream.type}
-                isMuted={pinnedStream.isMuted}
-                isSpeaking={pinnedStream.isSpeaking}
-                isPinned={true}
-                qualityMode={getQuality(pinnedStream.id, true, false)}
-                onTogglePin={onTogglePin}
-                onRemove={pinnedStream.onRemove}
-                onAspectRatioChange={handleAspectRatioChange}
-                style={
-                  hasDimensions
-                    ? { width: `${mainSize.width}px`, height: `${mainSize.height}px` }
-                    : { aspectRatio: `${pinnedRatio}`, maxWidth: '100%', maxHeight: '100%' }
-                }
-              />
+              {renderTile(pinnedStream, {
+                isPinned: true,
+                isThumbnail: false,
+                style: hasDimensions
+                  ? { width: `${mainSize.width}px`, height: `${mainSize.height}px` }
+                  : { aspectRatio: `${pinnedRatio}`, maxWidth: '100%', maxHeight: '100%' }
+              })}
             </div>
 
-            {/* Dải thumbnail cuộn ngang bên dưới */}
             <div
               style={{ height: `${stripH}px` }}
               className="w-full shrink-0 flex flex-row items-center justify-center gap-2.5 overflow-x-auto py-1"
@@ -351,22 +430,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   title="Nhấp để chuyển tiêu điểm"
                   className="h-full aspect-video shrink-0 rounded-xl overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-brand-500/60 shadow-md"
                 >
-                  <VideoTile
-                    id={item.id}
-                    stream={item.stream}
-                    label={item.label}
-                    isLocal={item.isLocal}
-                    type={item.type}
-                    isMuted={item.isMuted}
-                    isSpeaking={item.isSpeaking}
-                    isPinned={false}
-                    isThumbnail={true}
-                    qualityMode={getQuality(item.id, false, true)}
-                    onTogglePin={onTogglePin}
-                    onRemove={item.onRemove}
-                    onAspectRatioChange={handleAspectRatioChange}
-                    className="w-full h-full"
-                  />
+                  {renderTile(item, { isPinned: false, isThumbnail: true, className: 'w-full h-full' })}
                 </div>
               ))}
             </div>
@@ -376,41 +440,28 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     }
 
     // ------------------------------------------------------------------------
-    // [1 VIDEO]: Căn giữa tuyệt đối, tối đa hóa trong viewport, chuẩn 16:9 / 4:3
+    // [1 Ô]: Căn giữa tuyệt đối, tối đa hóa trong viewport
     // ------------------------------------------------------------------------
     if (count === 1) {
       const single = allStreams[0];
-      const singleRatio = getStreamRatio(single.id, single.stream);
+      const singleRatio = getItemRatio(single);
       const target = fitBox(availW, availH, singleRatio);
 
       return (
         <div className="flex-1 w-full h-full min-h-0 flex items-center justify-center overflow-hidden">
-          <VideoTile
-            key={single.id}
-            id={single.id}
-            stream={single.stream}
-            label={single.label}
-            isLocal={single.isLocal}
-            type={single.type}
-            isMuted={single.isMuted}
-            isSpeaking={single.isSpeaking}
-            isPinned={false}
-            qualityMode={getQuality(single.id, false, false)}
-            onTogglePin={onTogglePin}
-            onRemove={single.onRemove}
-            onAspectRatioChange={handleAspectRatioChange}
-            style={
-              hasDimensions
-                ? { width: `${target.width}px`, height: `${target.height}px` }
-                : { aspectRatio: `${singleRatio}`, maxWidth: '100%', maxHeight: '100%' }
-            }
-          />
+          {renderTile(single, {
+            isPinned: false,
+            isThumbnail: false,
+            style: hasDimensions
+              ? { width: `${target.width}px`, height: `${target.height}px` }
+              : { aspectRatio: `${singleRatio}`, maxWidth: '100%', maxHeight: '100%' }
+          })}
         </div>
       );
     }
 
     // ------------------------------------------------------------------------
-    // [2 VIDEO]: Side-by-side (2 cột) trên landscape hoặc Stacked (2 hàng) trên portrait
+    // [2 Ô]: Side-by-side (2 cột) trên landscape hoặc Stacked (2 hàng) trên portrait
     // ------------------------------------------------------------------------
     if (count === 2) {
       const useSideBySide = isLandscape;
@@ -424,234 +475,67 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
             useSideBySide ? 'flex-row' : 'flex-col'
           }`}
         >
-          {allStreams.map(item => (
-            <div
-              key={item.id}
-              style={
-                hasDimensions
-                  ? { width: `${target.width}px`, height: `${target.height}px` }
-                  : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-              }
-              className="shrink-0 flex items-center justify-center"
-            >
-              <VideoTile
-                id={item.id}
-                stream={item.stream}
-                label={item.label}
-                isLocal={item.isLocal}
-                type={item.type}
-                isMuted={item.isMuted}
-                isSpeaking={item.isSpeaking}
-                isPinned={false}
-                qualityMode={getQuality(item.id, false, false)}
-                onTogglePin={onTogglePin}
-                onRemove={item.onRemove}
-                onAspectRatioChange={handleAspectRatioChange}
-                className="w-full h-full"
-              />
-            </div>
-          ))}
+          {allStreams.map(item => renderSizedSlot(item, target))}
         </div>
       );
     }
 
     // ------------------------------------------------------------------------
-    // [3-4 VIDEO]: Lưới cân bằng 2x2 vừa khít trong viewport, không cuộn dọc
-    // (Đối với 3 video trên màn dọc, tự động xếp dọc nếu cho kích thước lớn hơn)
+    // [3-4 Ô]: Lưới cân bằng 2x2 vừa khít trong viewport
     // ------------------------------------------------------------------------
     if (count === 3 || count === 4) {
-      // Kiểm tra xem trên mobile portrait thì xếp 1 cột 3 hàng có lớn hơn 2 cột không
       const isMobilePortrait = !isLandscape && count === 3;
       const stack3Target = isMobilePortrait ? fitBox(availW, (availH - gap * 2) / 3, 16 / 9) : null;
       const grid2x2Target = fitBox((availW - gap) / 2, (availH - gap) / 2, 16 / 9);
-
-      const useStack3 = isMobilePortrait && stack3Target && (stack3Target.width * stack3Target.height > grid2x2Target.width * grid2x2Target.height);
+      const useStack3 =
+        isMobilePortrait &&
+        stack3Target &&
+        stack3Target.width * stack3Target.height > grid2x2Target.width * grid2x2Target.height;
 
       if (useStack3 && stack3Target) {
         return (
           <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-2.5 overflow-hidden">
-            {allStreams.map(item => (
-              <div
-                key={item.id}
-                style={
-                  hasDimensions
-                    ? { width: `${stack3Target.width}px`, height: `${stack3Target.height}px` }
-                    : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-                }
-                className="shrink-0 flex items-center justify-center"
-              >
-                <VideoTile
-                  id={item.id}
-                  stream={item.stream}
-                  label={item.label}
-                  isLocal={item.isLocal}
-                  type={item.type}
-                  isMuted={item.isMuted}
-                  isSpeaking={item.isSpeaking}
-                  isPinned={false}
-                  qualityMode={getQuality(item.id, false, false)}
-                  onTogglePin={onTogglePin}
-                  onRemove={item.onRemove}
-                  onAspectRatioChange={handleAspectRatioChange}
-                  className="w-full h-full"
-                />
-              </div>
-            ))}
+            {allStreams.map(item => renderSizedSlot(item, stack3Target))}
           </div>
         );
       }
 
-      // Chuẩn 2x2: Hàng 1 (2 video), Hàng 2 (1 hoặc 2 video căn giữa)
-      const target = grid2x2Target;
       const row1 = allStreams.slice(0, 2);
       const row2 = allStreams.slice(2, count);
 
       return (
         <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 overflow-hidden">
-          {/* Hàng 1 (2 video) */}
           <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
-            {row1.map(item => (
-              <div
-                key={item.id}
-                style={
-                  hasDimensions
-                    ? { width: `${target.width}px`, height: `${target.height}px` }
-                    : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-                }
-                className="shrink-0 flex items-center justify-center"
-              >
-                <VideoTile
-                  id={item.id}
-                  stream={item.stream}
-                  label={item.label}
-                  isLocal={item.isLocal}
-                  type={item.type}
-                  isMuted={item.isMuted}
-                  isSpeaking={item.isSpeaking}
-                  isPinned={false}
-                  qualityMode={getQuality(item.id, false, false)}
-                  onTogglePin={onTogglePin}
-                  onRemove={item.onRemove}
-                  onAspectRatioChange={handleAspectRatioChange}
-                  className="w-full h-full"
-                />
-              </div>
-            ))}
+            {row1.map(item => renderSizedSlot(item, grid2x2Target))}
           </div>
-
-          {/* Hàng 2 (1 hoặc 2 video căn giữa, kích thước hoàn toàn đồng nhất) */}
           <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
-            {row2.map(item => (
-              <div
-                key={item.id}
-                style={
-                  hasDimensions
-                    ? { width: `${target.width}px`, height: `${target.height}px` }
-                    : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-                }
-                className="shrink-0 flex items-center justify-center"
-              >
-                <VideoTile
-                  id={item.id}
-                  stream={item.stream}
-                  label={item.label}
-                  isLocal={item.isLocal}
-                  type={item.type}
-                  isMuted={item.isMuted}
-                  isSpeaking={item.isSpeaking}
-                  isPinned={false}
-                  qualityMode={getQuality(item.id, false, false)}
-                  onTogglePin={onTogglePin}
-                  onRemove={item.onRemove}
-                  onAspectRatioChange={handleAspectRatioChange}
-                  className="w-full h-full"
-                />
-              </div>
-            ))}
+            {row2.map(item => renderSizedSlot(item, grid2x2Target))}
           </div>
         </div>
       );
     }
 
     // ------------------------------------------------------------------------
-    // [5-6 VIDEO]: Lưới 3x2 (hoặc 2x3 trên màn dọc) vừa vặn khung nhìn
+    // [5-6 Ô] (vd: 4 Camera + 1 Bảng trắng): Lưới 3x2 (hoặc 2x3 trên màn dọc)
     // ------------------------------------------------------------------------
     if (count === 5 || count === 6) {
       if (isLandscape) {
-        // 3 cột, 2 hàng
         const target = fitBox((availW - gap * 2) / 3, (availH - gap) / 2, 16 / 9);
         const row1 = allStreams.slice(0, 3);
         const row2 = allStreams.slice(3, count);
 
         return (
           <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 overflow-hidden">
-            {/* Hàng 1 (3 video) */}
             <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
-              {row1.map(item => (
-                <div
-                  key={item.id}
-                  style={
-                    hasDimensions
-                      ? { width: `${target.width}px`, height: `${target.height}px` }
-                      : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-                  }
-                  className="shrink-0 flex items-center justify-center"
-                >
-                  <VideoTile
-                    id={item.id}
-                    stream={item.stream}
-                    label={item.label}
-                    isLocal={item.isLocal}
-                    type={item.type}
-                    isMuted={item.isMuted}
-                    isSpeaking={item.isSpeaking}
-                    isPinned={false}
-                    qualityMode={getQuality(item.id, false, false)}
-                    onTogglePin={onTogglePin}
-                    onRemove={item.onRemove}
-                    onAspectRatioChange={handleAspectRatioChange}
-                    className="w-full h-full"
-                  />
-                </div>
-              ))}
+              {row1.map(item => renderSizedSlot(item, target))}
             </div>
-
-            {/* Hàng 2 (2 hoặc 3 video căn giữa) */}
             <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
-              {row2.map(item => (
-                <div
-                  key={item.id}
-                  style={
-                    hasDimensions
-                      ? { width: `${target.width}px`, height: `${target.height}px` }
-                      : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-                  }
-                  className="shrink-0 flex items-center justify-center"
-                >
-                  <VideoTile
-                    id={item.id}
-                    stream={item.stream}
-                    label={item.label}
-                    isLocal={item.isLocal}
-                    type={item.type}
-                    isMuted={item.isMuted}
-                    isSpeaking={item.isSpeaking}
-                    isPinned={false}
-                    qualityMode={getQuality(item.id, false, false)}
-                    onTogglePin={onTogglePin}
-                    onRemove={item.onRemove}
-                    onAspectRatioChange={handleAspectRatioChange}
-                    className="w-full h-full"
-                  />
-                </div>
-              ))}
+              {row2.map(item => renderSizedSlot(item, target))}
             </div>
           </div>
         );
       } else {
-        // Màn hình dọc: 2 cột, 3 hàng
         const target = fitBox((availW - gap) / 2, (availH - gap * 2) / 3, 16 / 9);
-
         return (
           <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-2.5 overflow-hidden">
             {[0, 2, 4].map(startIdx => {
@@ -659,33 +543,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
               if (rowItems.length === 0) return null;
               return (
                 <div key={startIdx} className="flex flex-row items-center justify-center gap-2.5 w-full">
-                  {rowItems.map(item => (
-                    <div
-                      key={item.id}
-                      style={
-                        hasDimensions
-                          ? { width: `${target.width}px`, height: `${target.height}px` }
-                          : { aspectRatio: '16/9', maxWidth: '100%', maxHeight: '100%' }
-                      }
-                      className="shrink-0 flex items-center justify-center"
-                    >
-                      <VideoTile
-                        id={item.id}
-                        stream={item.stream}
-                        label={item.label}
-                        isLocal={item.isLocal}
-                        type={item.type}
-                        isMuted={item.isMuted}
-                        isSpeaking={item.isSpeaking}
-                        isPinned={false}
-                        qualityMode={getQuality(item.id, false, false)}
-                        onTogglePin={onTogglePin}
-                        onRemove={item.onRemove}
-                        onAspectRatioChange={handleAspectRatioChange}
-                        className="w-full h-full"
-                      />
-                    </div>
-                  ))}
+                  {rowItems.map(item => renderSizedSlot(item, target))}
                 </div>
               );
             })}
@@ -695,28 +553,14 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     }
 
     // ------------------------------------------------------------------------
-    // [7+ VIDEO]: Lưới nhiều camera cuộn mượt mà
+    // [7+ Ô]: Lưới nhiều khung cuộn mượt mà
     // ------------------------------------------------------------------------
     return (
       <div className="flex-1 w-full h-full min-h-0 overflow-y-auto flex items-center justify-center py-2">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 w-full max-w-7xl mx-auto py-2">
           {allStreams.map(item => (
             <div key={item.id} className="w-full aspect-video rounded-2xl overflow-hidden shadow-md">
-              <VideoTile
-                id={item.id}
-                stream={item.stream}
-                label={item.label}
-                isLocal={item.isLocal}
-                type={item.type}
-                isMuted={item.isMuted}
-                isSpeaking={item.isSpeaking}
-                isPinned={false}
-                qualityMode={getQuality(item.id, false, false)}
-                onTogglePin={onTogglePin}
-                onRemove={item.onRemove}
-                onAspectRatioChange={handleAspectRatioChange}
-                className="w-full h-full"
-              />
+              {renderTile(item, { isPinned: false, isThumbnail: false, className: 'w-full h-full' })}
             </div>
           ))}
         </div>

@@ -21,7 +21,13 @@ import {
 import { Inject } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomService } from './room.service';
-import { CameraMetaPayload, ChatMessagePayload } from '../types';
+import {
+  CameraMetaPayload,
+  ChatMessagePayload,
+  WhiteboardPoint,
+  WhiteboardTool,
+  WhiteboardStroke
+} from '../types';
 
 @WebSocketGateway({
   cors: {
@@ -100,7 +106,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       roomId: cleanRoomId,
       yourId: client.id,
       isPolite: participant.isPolite,
-      peers: existingPeers
+      peers: existingPeers,
+      whiteboard: room.whiteboard
     });
 
     // Thông báo cho người đang có trong phòng biết có người mới vào
@@ -255,6 +262,149 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   /**
+   * SỰ KIỆN: 'whiteboard-toggle'
+   * Chỉ 1 trong 2 người được bật bảng trắng tại một thời điểm; chỉ người bật mới tắt được.
+   */
+  @SubscribeMessage('whiteboard-toggle')
+  handleWhiteboardToggle(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { isOpen: boolean }
+  ) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId) return;
+
+    const userName = client.data.userName || 'Khách';
+    const result = this.roomService.toggleWhiteboard(roomId, client.id, userName, Boolean(data?.isOpen));
+
+    if (!result.ok) {
+      client.emit('whiteboard-toggle-rejected', {
+        reason: result.reason,
+        whiteboard: result.whiteboard
+      });
+      return;
+    }
+
+    const wb = result.whiteboard!;
+    this.server.to(roomId).emit('whiteboard-state-updated', {
+      isOpen: wb.isOpen,
+      ownerId: wb.ownerId,
+      ownerName: wb.ownerName,
+      showGrid: wb.showGrid,
+      strokes: wb.strokes
+    });
+  }
+
+  /**
+   * SỰ KIỆN: 'whiteboard-draw-live'
+   * Truyền trực tiếp các đoạn nét đang vẽ dở sang đối phương để thấy chữ viết theo thời gian thực
+   */
+  @SubscribeMessage('whiteboard-draw-live')
+  handleWhiteboardDrawLive(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      strokeId: string;
+      tool: WhiteboardTool;
+      color: string;
+      size: number;
+      points: WhiteboardPoint[];
+    }
+  ) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId || !data?.strokeId || !Array.isArray(data?.points)) return;
+
+    client.to(roomId).emit('whiteboard-draw-live', {
+      strokeId: data.strokeId,
+      authorId: client.id,
+      tool: data.tool,
+      color: data.color,
+      size: data.size,
+      points: data.points
+    });
+  }
+
+  /**
+   * SỰ KIỆN: 'whiteboard-stroke-commit'
+   * Lưu nét vẽ hoàn chỉnh vào phòng và đồng bộ sang đối phương
+   */
+  @SubscribeMessage('whiteboard-stroke-commit')
+  handleWhiteboardStrokeCommit(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      id: string;
+      tool: WhiteboardTool;
+      color: string;
+      size: number;
+      points: WhiteboardPoint[];
+    }
+  ) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId || !data?.id || !Array.isArray(data?.points) || data.points.length === 0) return;
+
+    const stroke: WhiteboardStroke = {
+      id: data.id,
+      authorId: client.id,
+      authorName: client.data.userName || 'Khách',
+      tool: data.tool === 'eraser' ? 'eraser' : 'pen',
+      color: String(data.color || '#0f172a'),
+      size: Number(data.size) || 0.004,
+      points: data.points
+    };
+
+    if (this.roomService.addWhiteboardStroke(roomId, stroke)) {
+      client.to(roomId).emit('whiteboard-stroke-added', { stroke });
+    }
+  }
+
+  /**
+   * SỰ KIỆN: 'whiteboard-undo'
+   * Hoàn tác nét vẽ gần nhất của chính người yêu cầu
+   */
+  @SubscribeMessage('whiteboard-undo')
+  handleWhiteboardUndo(@ConnectedSocket() client: Socket) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId) return;
+
+    const removedId = this.roomService.undoWhiteboardStroke(roomId, client.id);
+    if (removedId) {
+      this.server.to(roomId).emit('whiteboard-stroke-removed', { strokeId: removedId });
+    }
+  }
+
+  /**
+   * SỰ KIỆN: 'whiteboard-clear'
+   * Xóa sạch toàn bộ nét vẽ trên bảng trắng chung
+   */
+  @SubscribeMessage('whiteboard-clear')
+  handleWhiteboardClear(@ConnectedSocket() client: Socket) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId) return;
+
+    if (this.roomService.clearWhiteboard(roomId)) {
+      this.server.to(roomId).emit('whiteboard-cleared');
+    }
+  }
+
+  /**
+   * SỰ KIỆN: 'whiteboard-grid-toggle'
+   * Đồng bộ chế độ nền trắng / nền kẻ ô ly
+   */
+  @SubscribeMessage('whiteboard-grid-toggle')
+  handleWhiteboardGridToggle(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { showGrid: boolean }
+  ) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId) return;
+
+    const nextGrid = Boolean(data?.showGrid);
+    if (this.roomService.setWhiteboardGrid(roomId, nextGrid)) {
+      this.server.to(roomId).emit('whiteboard-grid-updated', { showGrid: nextGrid });
+    }
+  }
+
+  /**
    * SỰ KIỆN: 'send-chat'
    * Chuyển phát tin nhắn văn bản tức thời
    */
@@ -292,12 +442,28 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     const roomId = this.roomService.getRoomIdBySocketId(client.id);
     if (!roomId) return;
 
-    const { removed, remainingCount, peerName } = this.roomService.leaveRoom(roomId, client.id);
+    const { removed, remainingCount, peerName, whiteboardClosed } = this.roomService.leaveRoom(
+      roomId,
+      client.id
+    );
 
     if (removed) {
       console.log(
         `[SignalingGateway] ${client.id} (${peerName}) đã rời phòng [${roomId}]. Còn lại: ${remainingCount}`
       );
+
+      if (whiteboardClosed) {
+        const room = this.roomService.getRoom(roomId);
+        if (room) {
+          client.to(roomId).emit('whiteboard-state-updated', {
+            isOpen: false,
+            ownerId: null,
+            ownerName: null,
+            showGrid: room.whiteboard.showGrid,
+            strokes: room.whiteboard.strokes
+          });
+        }
+      }
 
       client.to(roomId).emit('peer-left', {
         peerId: client.id,

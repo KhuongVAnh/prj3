@@ -37,7 +37,12 @@ import {
   PeerInfo,
   ChatMessage,
   WebRTCStats,
-  VideoQualityMode
+  VideoQualityMode,
+  WhiteboardState,
+  WhiteboardStroke,
+  WhiteboardLiveDraw,
+  WhiteboardPoint,
+  WhiteboardTool
 } from '../types';
 import { ICE_SERVERS } from '../constants/webrtc';
 
@@ -71,6 +76,20 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
 
   // Trạng thái chất lượng phát đi hiện tại của từng camera máy mình: Map cameraId -> 'high' | 'grid' | 'low'
   const [localQualityModes, setLocalQualityModes] = useState<Record<string, VideoQualityMode>>({});
+
+  // Trạng thái Bảng trắng chung (chỉ 1 trong 2 người được bật, cả 2 đều vẽ được)
+  const [whiteboardState, setWhiteboardState] = useState<WhiteboardState>({
+    isOpen: false,
+    ownerId: null,
+    ownerName: null,
+    showGrid: false,
+    strokes: []
+  });
+  const whiteboardLiveHandlerRef = useRef<((draw: WhiteboardLiveDraw) => void) | null>(null);
+  const whiteboardStateRef = useRef<WhiteboardState>(whiteboardState);
+  useEffect(() => {
+    whiteboardStateRef.current = whiteboardState;
+  }, [whiteboardState]);
 
   /**
    * CÁC THAM CHIẾU (REFS) QUẢN LÝ TÀI NGUYÊN BẤT ĐỒNG BỘ:
@@ -678,6 +697,78 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
   }, []);
 
   /**
+   * Bật/Tắt Bảng trắng chung (chỉ 1 người được bật tại một thời điểm)
+   */
+  const toggleWhiteboard = useCallback(() => {
+    const sock = socketRef.current;
+    if (!sock) return;
+
+    const current = whiteboardStateRef.current;
+    if (current.isOpen) {
+      // Chỉ người đã bật bảng mới được phép tắt
+      if (current.ownerId && current.ownerId !== sock.id) {
+        return;
+      }
+      sock.emit('whiteboard-toggle', { isOpen: false });
+    } else {
+      sock.emit('whiteboard-toggle', { isOpen: true });
+    }
+  }, []);
+
+  const emitWhiteboardLive = useCallback(
+    (payload: {
+      strokeId: string;
+      tool: WhiteboardTool;
+      color: string;
+      size: number;
+      points: WhiteboardPoint[];
+    }) => {
+      socketRef.current?.emit('whiteboard-draw-live', payload);
+    },
+    []
+  );
+
+  const commitWhiteboardStroke = useCallback(
+    (stroke: Omit<WhiteboardStroke, 'authorId' | 'authorName'>) => {
+      const sock = socketRef.current;
+      const fullStroke: WhiteboardStroke = {
+        ...stroke,
+        authorId: sock?.id || 'local',
+        authorName: userName
+      };
+
+      setWhiteboardState(prev => ({
+        ...prev,
+        strokes: [...prev.strokes, fullStroke]
+      }));
+
+      sock?.emit('whiteboard-stroke-commit', stroke);
+    },
+    [userName]
+  );
+
+  const undoWhiteboard = useCallback(() => {
+    socketRef.current?.emit('whiteboard-undo');
+  }, []);
+
+  const clearWhiteboard = useCallback(() => {
+    socketRef.current?.emit('whiteboard-clear');
+  }, []);
+
+  const toggleWhiteboardGrid = useCallback(() => {
+    const nextGrid = !whiteboardStateRef.current.showGrid;
+    setWhiteboardState(prev => ({ ...prev, showGrid: nextGrid }));
+    socketRef.current?.emit('whiteboard-grid-toggle', { showGrid: nextGrid });
+  }, []);
+
+  const registerWhiteboardLiveHandler = useCallback(
+    (handler: ((draw: WhiteboardLiveDraw) => void) | null) => {
+      whiteboardLiveHandlerRef.current = handler;
+    },
+    []
+  );
+
+  /**
    * VÒNG ĐỜI KẾT NỐI WEBSOCKET & WEBRTC:
    * Quản lý bắt tay tín hiệu, đàm phán W3C Perfect Negotiation và đón nhận các luồng media.
    */
@@ -1051,29 +1142,46 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
     });
 
     // Khi máy mình tham gia thành công vào phòng
-    socketInstance.on('room-joined', async ({ isPolite: politeRole, peers }: { roomId: string; yourId: string; isPolite: boolean; peers: any[] }) => {
-      isPoliteRef.current = politeRole;
-      setIsPolite(politeRole);
-      console.log(`[Socket] Vào phòng thành công. Vai trò isPolite: ${politeRole}. Danh sách peers hiện có:`, peers);
+    socketInstance.on(
+      'room-joined',
+      async ({
+        isPolite: politeRole,
+        peers,
+        whiteboard
+      }: {
+        roomId: string;
+        yourId: string;
+        isPolite: boolean;
+        peers: any[];
+        whiteboard?: WhiteboardState;
+      }) => {
+        isPoliteRef.current = politeRole;
+        setIsPolite(politeRole);
+        console.log(`[Socket] Vào phòng thành công. Vai trò isPolite: ${politeRole}. Danh sách peers hiện có:`, peers);
 
-      if (peers.length > 0) {
-        const peer = peers[0];
-        const pInfo: PeerInfo = {
-          peerId: peer.peerId,
-          peerName: peer.peerName,
-          isPolite: peer.isPolite,
-          isMuted: peer.isMuted,
-          cameras: peer.cameras || []
-        };
-        peerInfoRef.current = pInfo;
-        setPeerInfo(pInfo);
-        remoteCameraMetaRef.current = peer.cameras || [];
-        pcInitPromiseRef.current = setupPeerConnection(); // Khởi tạo PeerConnection
+        if (whiteboard) {
+          setWhiteboardState(whiteboard);
+        }
+
+        if (peers.length > 0) {
+          const peer = peers[0];
+          const pInfo: PeerInfo = {
+            peerId: peer.peerId,
+            peerName: peer.peerName,
+            isPolite: peer.isPolite,
+            isMuted: peer.isMuted,
+            cameras: peer.cameras || []
+          };
+          peerInfoRef.current = pInfo;
+          setPeerInfo(pInfo);
+          remoteCameraMetaRef.current = peer.cameras || [];
+          pcInitPromiseRef.current = setupPeerConnection(); // Khởi tạo PeerConnection
+        }
+
+        // Đồng bộ trạng thái tắt/bật mic ban đầu của máy mình lên phòng
+        socketInstance.emit('mic-state-update', { isMuted: isMutedRef.current });
       }
-
-      // Đồng bộ trạng thái tắt/bật mic ban đầu của máy mình lên phòng
-      socketInstance.emit('mic-state-update', { isMuted: isMutedRef.current });
-    });
+    );
 
     // Khi có người thứ 2 tham gia vào phòng
     socketInstance.on('peer-joined', ({ peerId, peerName, isPolite: remoteIsPolite }: { peerId: string; peerName: string; isPolite: boolean }) => {
@@ -1180,6 +1288,43 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
     // Nhận tin nhắn chat
     socketInstance.on('chat-message', (msg: ChatMessage) => {
       setChatMessages(prev => [...prev, msg]);
+    });
+
+    // Đồng bộ trạng thái Bảng trắng chung
+    socketInstance.on('whiteboard-state-updated', (wb: WhiteboardState) => {
+      setWhiteboardState(wb);
+    });
+
+    socketInstance.on('whiteboard-toggle-rejected', ({ whiteboard }: { reason: string; whiteboard?: WhiteboardState }) => {
+      if (whiteboard) {
+        setWhiteboardState(whiteboard);
+      }
+    });
+
+    socketInstance.on('whiteboard-draw-live', (draw: WhiteboardLiveDraw) => {
+      whiteboardLiveHandlerRef.current?.(draw);
+    });
+
+    socketInstance.on('whiteboard-stroke-added', ({ stroke }: { stroke: WhiteboardStroke }) => {
+      setWhiteboardState(prev => {
+        if (prev.strokes.some(s => s.id === stroke.id)) return prev;
+        return { ...prev, strokes: [...prev.strokes, stroke] };
+      });
+    });
+
+    socketInstance.on('whiteboard-stroke-removed', ({ strokeId }: { strokeId: string }) => {
+      setWhiteboardState(prev => ({
+        ...prev,
+        strokes: prev.strokes.filter(s => s.id !== strokeId)
+      }));
+    });
+
+    socketInstance.on('whiteboard-cleared', () => {
+      setWhiteboardState(prev => ({ ...prev, strokes: [] }));
+    });
+
+    socketInstance.on('whiteboard-grid-updated', ({ showGrid }: { showGrid: boolean }) => {
+      setWhiteboardState(prev => ({ ...prev, showGrid }));
     });
 
     // Khi đối phương rời phòng họp
@@ -1342,6 +1487,15 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
     // Pin-adaptive quality
     localQualityModes,
     sendPinStateUpdate,
-    setCameraQuality: applyEncodingQuality
+    setCameraQuality: applyEncodingQuality,
+    // Whiteboard
+    whiteboardState,
+    toggleWhiteboard,
+    emitWhiteboardLive,
+    commitWhiteboardStroke,
+    undoWhiteboard,
+    clearWhiteboard,
+    toggleWhiteboardGrid,
+    registerWhiteboardLiveHandler
   };
 }

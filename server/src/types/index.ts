@@ -18,6 +18,42 @@
 export type CameraType = 'physical' | 'screen';
 
 /**
+ * Tọa độ chuẩn hóa (0..1) trên khung Bảng trắng tỉ lệ 16:9
+ */
+export interface WhiteboardPoint {
+  x: number;
+  y: number;
+}
+
+export type WhiteboardTool = 'pen' | 'eraser';
+
+/**
+ * Một nét vẽ đã hoàn thành trên Bảng trắng chung
+ */
+export interface WhiteboardStroke {
+  id: string;
+  authorId: string;
+  authorName: string;
+  tool: WhiteboardTool;
+  color: string;
+  size: number;
+  points: WhiteboardPoint[];
+}
+
+/**
+ * Trạng thái Bảng trắng của mỗi phòng họp:
+ * - Chỉ 1 người được giữ quyền bật/tắt tại một thời điểm (ownerId)
+ * - Cả 2 người đều có thể vẽ, đồng bộ thời gian thực và lưu suốt phiên phòng họp
+ */
+export interface WhiteboardState {
+  isOpen: boolean;
+  ownerId: string | null;
+  ownerName: string | null;
+  showGrid: boolean;
+  strokes: WhiteboardStroke[];
+}
+
+/**
  * Thông tin chi tiết của một luồng camera được phát từ phía client:
  */
 export interface CameraInfo {
@@ -47,6 +83,7 @@ export interface RoomData {
   id: string;                                   // Mã phòng (vd: "meet-123-456")
   participants: Map<string, RoomParticipant>;   // Danh sách thành viên (lưu dưới dạng Map socketId -> Participant)
   createdAt: number;                            // Thời điểm tạo phòng (Unix timestamp)
+  whiteboard: WhiteboardState;                  // Trạng thái Bảng trắng chung của phòng
 }
 
 /**

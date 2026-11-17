@@ -24,7 +24,8 @@ import {
   MessageSquare,
   Activity,
   PhoneOff,
-  Share2
+  Share2,
+  PenTool
 } from 'lucide-react';
 import { CameraSource } from '../types';
 
@@ -36,6 +37,10 @@ interface ControlBarProps {
   onOpenCamManager: () => void;
   onToggleScreenShare: () => void;
   isScreenSharing: boolean;
+  isWhiteboardOpen: boolean;
+  isWhiteboardOwner: boolean;
+  whiteboardOwnerName: string | null;
+  onToggleWhiteboard: () => void;
   onToggleChat: () => void;
   isChatOpen: boolean;
   unreadCount?: number;
@@ -53,6 +58,10 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onOpenCamManager,
   onToggleScreenShare,
   isScreenSharing,
+  isWhiteboardOpen,
+  isWhiteboardOwner,
+  whiteboardOwnerName,
+  onToggleWhiteboard,
   onToggleChat,
   isChatOpen,
   unreadCount = 0,
@@ -63,6 +72,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
 }) => {
   const hasActiveCamera = localCameras.length > 0;
   const activeCameraCount = localCameras.length;
+  const isWhiteboardLockedByOther = isWhiteboardOpen && !isWhiteboardOwner;
 
   return (
     <div className="flex items-center justify-center p-4 z-20">
@@ -121,6 +131,35 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           }`}
         >
           <Share2 className="w-5 h-5" />
+        </button>
+
+        {/* Shared Whiteboard (chỉ 1 trong 2 người được bật) */}
+        <button
+          onClick={onToggleWhiteboard}
+          disabled={isWhiteboardLockedByOther}
+          title={
+            isWhiteboardLockedByOther
+              ? `Bảng trắng đang được bật bởi ${whiteboardOwnerName || 'đối phương'}`
+              : isWhiteboardOpen
+              ? 'Tắt Bảng trắng'
+              : 'Mở Bảng trắng chung'
+          }
+          className={`relative p-3.5 rounded-full transition-all duration-200 flex items-center justify-center ${
+            isWhiteboardLockedByOther
+              ? 'bg-white/5 text-slate-500 border border-white/10 cursor-not-allowed'
+              : isWhiteboardOpen && isWhiteboardOwner
+              ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/25'
+              : 'bg-white/10 text-slate-100 hover:bg-white/20'
+          }`}
+        >
+          <PenTool className="w-5 h-5" />
+          {isWhiteboardOpen && (
+            <span
+              className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
+                isWhiteboardOwner ? 'bg-slate-950' : 'bg-amber-400 animate-pulse'
+              }`}
+            />
+          )}
         </button>
 
         {/* Chat Drawer Toggle */}

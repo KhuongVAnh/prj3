@@ -66,7 +66,15 @@ export const Room: React.FC<RoomProps> = ({
     hasTurnServer,
     iceConnectionState,
     localQualityModes,
-    sendPinStateUpdate
+    sendPinStateUpdate,
+    whiteboardState,
+    toggleWhiteboard,
+    emitWhiteboardLive,
+    commitWhiteboardStroke,
+    undoWhiteboard,
+    clearWhiteboard,
+    toggleWhiteboardGrid,
+    registerWhiteboardLiveHandler
   } = useWebRTC(roomId, userName, initialAudio);
 
   // Audio level monitoring for local and remote users
@@ -92,6 +100,14 @@ export const Room: React.FC<RoomProps> = ({
     }
     prevMessagesLength.current = chatMessages.length;
   }, [chatMessages, isChatOpen]);
+
+  // Nếu bảng trắng đang được ghim mà bị tắt -> bỏ ghim để khôi phục 720p grid cho các camera
+  useEffect(() => {
+    if (pinnedId === 'whiteboard' && !whiteboardState.isOpen) {
+      setPinnedId(null);
+      sendPinStateUpdate(null);
+    }
+  }, [pinnedId, whiteboardState.isOpen, sendPinStateUpdate]);
 
   // Call duration counter
   useEffect(() => {
@@ -223,6 +239,9 @@ export const Room: React.FC<RoomProps> = ({
   }
 
   const isPeerConnected = Boolean(peerInfo);
+  const isWhiteboardOwner = Boolean(
+    whiteboardState.isOpen && whiteboardState.ownerId && socket?.id && whiteboardState.ownerId === socket.id
+  );
   const totalActiveStreams = localCameras.length + remoteCameras.length;
 
   return (
@@ -315,6 +334,15 @@ export const Room: React.FC<RoomProps> = ({
           roomId={roomId}
           onOpenCamManager={() => setIsCamManagerOpen(true)}
           onShareRoom={handleCopyLink}
+          whiteboardState={whiteboardState}
+          isWhiteboardOwner={isWhiteboardOwner}
+          onCloseWhiteboard={toggleWhiteboard}
+          onWhiteboardLiveDraw={emitWhiteboardLive}
+          onWhiteboardCommitStroke={commitWhiteboardStroke}
+          onWhiteboardUndo={undoWhiteboard}
+          onWhiteboardClear={clearWhiteboard}
+          onWhiteboardToggleGrid={toggleWhiteboardGrid}
+          registerWhiteboardLiveHandler={registerWhiteboardLiveHandler}
         />
 
         {/* In-Call Chat Drawer */}
@@ -336,6 +364,10 @@ export const Room: React.FC<RoomProps> = ({
         onOpenCamManager={() => setIsCamManagerOpen(true)}
         onToggleScreenShare={handleToggleScreenShareInModal}
         isScreenSharing={localCameras.some(c => c.type === 'screen')}
+        isWhiteboardOpen={whiteboardState.isOpen}
+        isWhiteboardOwner={isWhiteboardOwner}
+        whiteboardOwnerName={whiteboardState.ownerName}
+        onToggleWhiteboard={toggleWhiteboard}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}
         isChatOpen={isChatOpen}
         unreadCount={unreadChatCount}

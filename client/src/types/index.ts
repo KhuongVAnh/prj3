@@ -20,6 +20,43 @@ export type CameraType = 'physical' | 'screen';
 export type VideoQualityMode = 'high' | 'grid' | 'low';
 
 /**
+ * Tọa độ chuẩn hóa (0..1) trên khung Bảng trắng tỉ lệ 16:9
+ */
+export interface WhiteboardPoint {
+  x: number;
+  y: number;
+}
+
+export type WhiteboardTool = 'pen' | 'eraser';
+
+export interface WhiteboardStroke {
+  id: string;
+  authorId: string;
+  authorName: string;
+  tool: WhiteboardTool;
+  color: string;
+  size: number;
+  points: WhiteboardPoint[];
+}
+
+export interface WhiteboardLiveDraw {
+  strokeId: string;
+  authorId: string;
+  tool: WhiteboardTool;
+  color: string;
+  size: number;
+  points: WhiteboardPoint[];
+}
+
+export interface WhiteboardState {
+  isOpen: boolean;
+  ownerId: string | null;
+  ownerName: string | null;
+  showGrid: boolean;
+  strokes: WhiteboardStroke[];
+}
+
+/**
  * Nguồn camera cục bộ (Local Camera):
  * Đại diện cho một luồng video đang được phát từ phía máy của người dùng.
  */

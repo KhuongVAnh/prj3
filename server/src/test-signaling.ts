@@ -310,7 +310,110 @@ async function runSignalingTest() {
     }
     console.log(`✓ Configured /api/ice-servers returned ${turnJson.iceServers.length} ICE servers (hasTurn=true, provider=custom)`);
 
-    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (10/10) ---');
+    // -------------------------------------------------------------
+    // [Test 11] Shared Whiteboard: 1-of-2 lock, co-drawing, undo isolation, disconnect release & persistence
+    // -------------------------------------------------------------
+    console.log('[Test 11] Testing Shared Whiteboard lock, co-drawing & persistence...');
+    const wbHost: ClientSocketType = ClientSocket(url);
+    const wbGuest: ClientSocketType = ClientSocket(url);
+
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        wbHost.on('connect', () => wbHost.emit('join-room', { roomId: 'test-room-wb', userName: 'Teacher' }));
+        wbHost.on('room-joined', () => resolve());
+        setTimeout(() => reject(new Error('wbHost join timeout')), 3000);
+      }),
+      new Promise<void>((resolve, reject) => {
+        wbGuest.on('connect', () => wbGuest.emit('join-room', { roomId: 'test-room-wb', userName: 'Student' }));
+        wbGuest.on('room-joined', () => resolve());
+        setTimeout(() => reject(new Error('wbGuest join timeout')), 3000);
+      })
+    ]);
+
+    // Host opens whiteboard -> both receive whiteboard-state-updated
+    await new Promise<void>((resolve, reject) => {
+      wbGuest.once('whiteboard-state-updated', (wb) => {
+        if (wb.isOpen && wb.ownerId === wbHost.id) {
+          console.log('✓ Host opened whiteboard; Guest locked out of ownership');
+          resolve();
+        } else {
+          reject(new Error(`Unexpected whiteboard open state: ${JSON.stringify(wb)}`));
+        }
+      });
+      wbHost.emit('whiteboard-toggle', { isOpen: true });
+      setTimeout(() => reject(new Error('wb open timeout')), 3000);
+    });
+
+    // Guest tries to hijack or close whiteboard -> server rejects both
+    await new Promise<void>((resolve, reject) => {
+      let sawAlreadyOpen = false;
+      wbGuest.on('whiteboard-toggle-rejected', (err) => {
+        if (err.reason === 'already-open') {
+          sawAlreadyOpen = true;
+          wbGuest.emit('whiteboard-toggle', { isOpen: false });
+        } else if (err.reason === 'not-owner' && sawAlreadyOpen) {
+          console.log('✓ Server rejected Guest attempt to open or close Host whiteboard');
+          resolve();
+        }
+      });
+      wbGuest.emit('whiteboard-toggle', { isOpen: true });
+      setTimeout(() => reject(new Error('wb lock test timeout')), 3000);
+    });
+
+    // Both draw strokes, Guest undoes only Guest stroke
+    await new Promise<void>((resolve, reject) => {
+      wbGuest.once('whiteboard-stroke-added', ({ stroke }) => {
+        if (stroke.id === 's-host') {
+          wbGuest.emit('whiteboard-stroke-commit', {
+            id: 's-guest',
+            tool: 'pen',
+            color: '#ef4444',
+            size: 0.004,
+            points: [{ x: 0.3, y: 0.3 }, { x: 0.4, y: 0.4 }]
+          });
+        }
+      });
+      wbHost.once('whiteboard-stroke-added', ({ stroke }) => {
+        if (stroke.id === 's-guest') {
+          wbGuest.emit('whiteboard-undo');
+        }
+      });
+      wbHost.once('whiteboard-stroke-removed', ({ strokeId }) => {
+        if (strokeId === 's-guest') {
+          console.log('✓ Co-drawing & per-author undo verified');
+          resolve();
+        } else {
+          reject(new Error(`Wrong stroke undone: ${strokeId}`));
+        }
+      });
+
+      wbHost.emit('whiteboard-stroke-commit', {
+        id: 's-host',
+        tool: 'pen',
+        color: '#0f172a',
+        size: 0.004,
+        points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }]
+      });
+      setTimeout(() => reject(new Error('wb draw/undo timeout')), 3000);
+    });
+
+    // Host disconnects -> ownership auto-released, strokes preserved when Guest opens later
+    await new Promise<void>((resolve, reject) => {
+      wbGuest.once('whiteboard-state-updated', (wb) => {
+        if (!wb.isOpen && wb.ownerId === null && wb.strokes.length === 1 && wb.strokes[0].id === 's-host') {
+          console.log('✓ Host disconnect released whiteboard lock & preserved strokes');
+          resolve();
+        } else {
+          reject(new Error(`Unexpected wb state after owner disconnect: ${JSON.stringify(wb)}`));
+        }
+      });
+      wbHost.disconnect();
+      setTimeout(() => reject(new Error('wb disconnect release timeout')), 3000);
+    });
+
+    wbGuest.disconnect();
+
+    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (11/11) ---');
   } finally {
     await app.close();
   }
