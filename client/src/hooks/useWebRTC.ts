@@ -41,7 +41,7 @@ import {
 } from '../types';
 import { ICE_SERVERS } from '../constants/webrtc';
 
-export function useWebRTC(roomId: string, userName: string) {
+export function useWebRTC(roomId: string, userName: string, initialAudio: boolean = true) {
   // Trạng thái kết nối WebSocket tới Signaling Server
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -56,7 +56,7 @@ export function useWebRTC(roomId: string, userName: string) {
   // Trạng thái media âm thanh của máy cục bộ
   const [localAudioStream, setLocalAudioStream] = useState<MediaStream | null>(null);
   const [remoteAudioStream, setRemoteAudioStream] = useState<MediaStream | null>(null);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(!initialAudio);
 
   // Danh sách các luồng camera đang hoạt động
   const [localCameras, setLocalCameras] = useState<CameraSource[]>([]);       // Camera máy mình đang phát
@@ -83,6 +83,8 @@ export function useWebRTC(roomId: string, userName: string) {
   const localAudioStreamRef = useRef<MediaStream | null>(null);
   const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const audioSenderRef = useRef<RTCRtpSender | null>(null); // Quản lý bộ phát âm thanh (Microphone)
+  const isMutedRef = useRef<boolean>(!initialAudio);
+  const audioInitPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
   const cameraSendersRef = useRef<Map<string, RTCRtpSender>>(new Map()); // Quản lý các bộ phát video: Map cameraId -> RTCRtpSender
   const remoteAudioElemRef = useRef<HTMLAudioElement | null>(null);
   const peerInfoRef = useRef<PeerInfo | null>(null);
@@ -211,47 +213,130 @@ export function useWebRTC(roomId: string, userName: string) {
    * Bật các thuật toán lọc tạp âm, chống vọng âm (echo cancellation, noise suppression).
    */
   const initAudio = useCallback(async () => {
-    try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true, // Chống tiếng vang vọng
-          noiseSuppression: true, // Lọc tiếng ồn môi trường
-          autoGainControl: true   // Tự động cân bằng âm lượng
-        },
-        video: false
-      });
-      localAudioStreamRef.current = audioStream;
-      setLocalAudioStream(audioStream);
+    if (audioInitPromiseRef.current) {
+      return audioInitPromiseRef.current;
+    }
 
-      const track = audioStream.getAudioTracks()[0];
-      localAudioTrackRef.current = track;
+    const promise = (async () => {
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true, // Chống tiếng vang vọng
+            noiseSuppression: true, // Lọc tiếng ồn môi trường
+            autoGainControl: true   // Tự động cân bằng âm lượng
+          },
+          video: false
+        });
 
-      // Nếu đã có kết nối RTCPeerConnection thì nạp track âm thanh vào ngay
-      if (pcRef.current && track) {
-        if (!audioSenderRef.current) {
-          audioSenderRef.current = pcRef.current.addTrack(track, audioStream);
+        // Nếu hook đã unmount trong lúc chờ xin quyền micro thì giải phóng ngay tránh rò rỉ track
+        if (!socketRef.current) {
+          audioStream.getTracks().forEach(t => t.stop());
+          return null;
         }
+
+        // Dừng luồng micro cũ (nếu có) trước khi thay thế
+        if (localAudioStreamRef.current) {
+          localAudioStreamRef.current.getAudioTracks().forEach(t => t.stop());
+        }
+        if (localAudioTrackRef.current && localAudioTrackRef.current.readyState !== 'ended') {
+          localAudioTrackRef.current.stop();
+        }
+
+        const track = audioStream.getAudioTracks()[0] || null;
+        if (track) {
+          track.enabled = !isMutedRef.current;
+        }
+
+        localAudioStreamRef.current = audioStream;
+        localAudioTrackRef.current = track;
+        setLocalAudioStream(audioStream);
+
+        // Nếu đã có kết nối RTCPeerConnection thì nạp/thay thế track âm thanh ngay
+        const pc = pcRef.current;
+        if (pc && pc.signalingState !== 'closed' && track) {
+          const existingSender =
+            audioSenderRef.current && pc.getSenders().includes(audioSenderRef.current)
+              ? audioSenderRef.current
+              : pc.getSenders().find(s => s.track?.kind === 'audio') || null;
+
+          if (existingSender) {
+            await existingSender.replaceTrack(track);
+            audioSenderRef.current = existingSender;
+          } else {
+            audioSenderRef.current = pc.addTrack(track, audioStream);
+          }
+        }
+        return audioStream;
+      } catch (err) {
+        console.warn('[Audio] Không thể lấy quyền truy cập micro:', err);
+        if (!localAudioTrackRef.current) {
+          isMutedRef.current = true;
+          setIsMuted(true);
+        }
+        return null;
+      } finally {
+        audioInitPromiseRef.current = null;
       }
-      return audioStream;
-    } catch (err) {
-      console.warn('[Audio] Không thể lấy quyền truy cập micro:', err);
-      return null;
+    })();
+
+    audioInitPromiseRef.current = promise;
+    return promise;
+  }, []);
+
+  /**
+   * Đồng bộ thuộc tính enabled trên toàn bộ audio track cục bộ và RTCRtpSender
+   */
+  const syncAudioTracksEnabled = useCallback((enabled: boolean) => {
+    if (localAudioTrackRef.current) {
+      localAudioTrackRef.current.enabled = enabled;
+    }
+    if (localAudioStreamRef.current) {
+      localAudioStreamRef.current.getAudioTracks().forEach(t => {
+        t.enabled = enabled;
+      });
+    }
+    if (audioSenderRef.current?.track) {
+      audioSenderRef.current.track.enabled = enabled;
+    }
+    if (pcRef.current && pcRef.current.signalingState !== 'closed') {
+      pcRef.current.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = enabled;
+        }
+      });
     }
   }, []);
 
   /**
-   * Bật/Tắt Micro (Mute/Unmute) và thông báo trạng thái cho người bên kia
+   * Bật/Tắt Micro (Mute/Unmute) và thông báo trạng thái cho người bên kia.
+   * Hỗ trợ cả trường hợp người dùng vào phòng với mic đang tắt (chưa khởi tạo stream)
+   * rồi bấm bật mic lại sau đó.
    */
-  const toggleMute = useCallback(() => {
-    if (localAudioTrackRef.current) {
-      const newEnabled = !localAudioTrackRef.current.enabled;
-      localAudioTrackRef.current.enabled = newEnabled;
-      setIsMuted(!newEnabled);
-      if (socketRef.current) {
-        socketRef.current.emit('mic-state-update', { isMuted: !newEnabled });
+  const toggleMute = useCallback(async () => {
+    const nextMuted = !isMutedRef.current;
+    isMutedRef.current = nextMuted;
+    setIsMuted(nextMuted);
+
+    // Áp dụng ngay lập tức cho mọi audio track hiện có (nếu đang có mic)
+    syncAudioTracksEnabled(!nextMuted);
+
+    // Nếu người dùng bấm BẬT mic mà chưa có track live (do vào phòng tắt mic từ Lobby hoặc mất quyền) -> xin lại mic
+    if (!nextMuted && (!localAudioTrackRef.current || localAudioTrackRef.current.readyState === 'ended')) {
+      const stream = await initAudio();
+      if (!stream || !localAudioTrackRef.current) {
+        // Không mở được mic (chặn quyền hoặc thiếu thiết bị) -> giữ trạng thái Muted
+        isMutedRef.current = true;
+        setIsMuted(true);
+        socketRef.current?.emit('mic-state-update', { isMuted: true });
+        return;
       }
+      syncAudioTracksEnabled(!isMutedRef.current);
     }
-  }, []);
+
+    if (socketRef.current) {
+      socketRef.current.emit('mic-state-update', { isMuted: isMutedRef.current });
+    }
+  }, [initAudio, syncAudioTracksEnabled]);
 
   /**
    * ÁP DỤNG THÔNG SỐ CHẤT LƯỢNG MÃ HÓA (BITRATE / SCALE / FPS) CHO SENDER:
@@ -922,6 +1007,7 @@ export function useWebRTC(roomId: string, userName: string) {
       const audioStream = localAudioStreamRef.current;
       const audioTrack = localAudioTrackRef.current;
       if (audioTrack && audioTrack.readyState === 'live') {
+        audioTrack.enabled = !isMutedRef.current;
         const stream = audioStream || new MediaStream([audioTrack]);
         audioSenderRef.current = pc.addTrack(audioTrack, stream);
       }
@@ -984,6 +1070,9 @@ export function useWebRTC(roomId: string, userName: string) {
         remoteCameraMetaRef.current = peer.cameras || [];
         pcInitPromiseRef.current = setupPeerConnection(); // Khởi tạo PeerConnection
       }
+
+      // Đồng bộ trạng thái tắt/bật mic ban đầu của máy mình lên phòng
+      socketInstance.emit('mic-state-update', { isMuted: isMutedRef.current });
     });
 
     // Khi có người thứ 2 tham gia vào phòng
@@ -1003,6 +1092,8 @@ export function useWebRTC(roomId: string, userName: string) {
 
       // Người vào trước (Impolite Initiator) chuẩn bị kết nối và gửi Offer đầu tiên
       pcInitPromiseRef.current = setupPeerConnection();
+      // Đồng bộ lại trạng thái mic hiện tại của máy mình cho người mới vào biết
+      socketInstance.emit('mic-state-update', { isMuted: isMutedRef.current });
     });
 
     /**
@@ -1208,6 +1299,11 @@ export function useWebRTC(roomId: string, userName: string) {
       localCamerasRef.current.forEach(cam => cam.stream.getTracks().forEach(t => t.stop()));
       localCamerasRef.current = [];
       // Tắt micro
+      audioInitPromiseRef.current = null;
+      if (localAudioStreamRef.current) {
+        localAudioStreamRef.current.getTracks().forEach(t => t.stop());
+        localAudioStreamRef.current = null;
+      }
       if (localAudioTrackRef.current) {
         localAudioTrackRef.current.stop();
         localAudioTrackRef.current = null;

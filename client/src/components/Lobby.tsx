@@ -61,10 +61,15 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
   // Handle local video & audio preview
   useEffect(() => {
+    let cancelled = false;
     let stream: MediaStream | null = null;
     let audioCtx: AudioContext | null = null;
     let analyser: AnalyserNode | null = null;
     let source: MediaStreamAudioSourceNode | null = null;
+
+    if (!isAudioEnabled) {
+      setAudioLevel(0);
+    }
 
     const setupPreview = async () => {
       // Cleanup previous
@@ -85,6 +90,12 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
               audio: isAudioEnabled
             });
           }
+
+          if (cancelled) {
+            stream.getTracks().forEach(t => t.stop());
+            return;
+          }
+
           setPreviewStream(stream);
 
           // Audio meter
@@ -98,7 +109,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             const updateMeter = () => {
-              if (!analyser) return;
+              if (!analyser || cancelled) return;
               analyser.getByteFrequencyData(dataArray);
               let sum = 0;
               for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
@@ -119,6 +130,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     setupPreview();
 
     return () => {
+      cancelled = true;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (source) {
         try { source.disconnect(); } catch (_) {}

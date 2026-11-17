@@ -67,7 +67,7 @@ export const Room: React.FC<RoomProps> = ({
     iceConnectionState,
     localQualityModes,
     sendPinStateUpdate
-  } = useWebRTC(roomId, userName);
+  } = useWebRTC(roomId, userName, initialAudio);
 
   // Audio level monitoring for local and remote users
   const { isSpeaking: isLocalSpeaking } = useAudioLevel(localAudioStream, !isMuted);
