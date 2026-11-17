@@ -18,17 +18,27 @@ interface JoinConfig {
   initialVideo: boolean;
 }
 
+function getRoomFromUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  const roomParam = params.get('room');
+  return roomParam ? roomParam.trim().toLowerCase() : '';
+}
+
 export function App() {
-  const [initialRoomId, setInitialRoomId] = useState<string>('');
+  const [initialRoomId, setInitialRoomId] = useState<string>(() => getRoomFromUrl());
   const [currentConfig, setCurrentConfig] = useState<JoinConfig | null>(null);
 
-  // Parse URL search params (e.g. ?room=meet-123-456)
+  // Đồng bộ nếu người dùng bấm Back/Forward trên trình duyệt
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    if (roomParam) {
-      setInitialRoomId(roomParam.trim());
-    }
+    const handlePopState = () => {
+      const roomFromUrl = getRoomFromUrl();
+      setInitialRoomId(roomFromUrl);
+      if (!roomFromUrl) {
+        setCurrentConfig(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const handleJoinRoom = (

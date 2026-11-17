@@ -27,8 +27,11 @@ interface LobbyProps {
   onJoinRoom: (roomId: string, userName: string, initialAudio: boolean, initialVideo: boolean) => void;
 }
 
+const generateRandomRoomCode = () =>
+  `meet-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
+
 export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
-  const [roomId, setRoomId] = useState(initialRoomId || '');
+  const [roomId, setRoomId] = useState(() => initialRoomId || generateRandomRoomCode());
   const [userName, setUserName] = useState('');
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
@@ -49,13 +52,12 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     }
   }, []);
 
-  // Set initial room id or generate one
+  // Đồng bộ mã phòng từ link mời (?room=...) nếu prop initialRoomId thay đổi
   useEffect(() => {
-    if (!roomId) {
-      const randomCode = `meet-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
-      setRoomId(randomCode);
+    if (initialRoomId) {
+      setRoomId(initialRoomId);
     }
-  }, [roomId]);
+  }, [initialRoomId]);
 
   // Handle local video & audio preview
   useEffect(() => {
@@ -139,7 +141,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
-    const finalRoom = roomId.trim().toLowerCase();
+    const finalRoom = roomId.trim().toLowerCase() || generateRandomRoomCode();
     const finalName = userName.trim() || 'Guest';
     localStorage.setItem('omnicam_user_name', finalName);
 
@@ -152,8 +154,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
   };
 
   const handleCreateNewRoom = () => {
-    const randomCode = `meet-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
-    setRoomId(randomCode);
+    setRoomId(generateRandomRoomCode());
   };
 
   return (
