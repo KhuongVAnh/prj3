@@ -21,6 +21,8 @@ interface StatsModalProps {
   roomId: string;
   isPolite: boolean;
   peerConnected: boolean;
+  hasTurnServer?: boolean;
+  iceConnectionState?: RTCIceConnectionState;
 }
 
 export const StatsModal: React.FC<StatsModalProps> = ({
@@ -29,9 +31,27 @@ export const StatsModal: React.FC<StatsModalProps> = ({
   stats,
   roomId,
   isPolite,
-  peerConnected
+  peerConnected,
+  hasTurnServer = false,
+  iceConnectionState = 'new'
 }) => {
   if (!isOpen) return null;
+
+  const formatCandidateType = (type?: string) => {
+    if (!type) return peerConnected ? 'Đang thiết lập...' : 'Chờ kết nối';
+    switch (type) {
+      case 'host':
+        return 'Host (Cùng mạng LAN)';
+      case 'srflx':
+        return 'STUN Direct (P2P NAT)';
+      case 'prflx':
+        return 'Peer Reflexive (P2P)';
+      case 'relay':
+        return 'TURN Relay (Xuyên Firewall/4G)';
+      default:
+        return type;
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-md animate-fade-in">
@@ -124,12 +144,42 @@ export const StatsModal: React.FC<StatsModalProps> = ({
               </span>
             </div>
             <div className="flex justify-between items-center text-slate-400">
+              <span>ICE State:</span>
+              <span
+                className={`font-mono font-semibold ${
+                  iceConnectionState === 'connected' || iceConnectionState === 'completed'
+                    ? 'text-emerald-400'
+                    : iceConnectionState === 'failed'
+                    ? 'text-rose-400'
+                    : 'text-amber-300'
+                }`}
+              >
+                {iceConnectionState}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-slate-400">
+              <span>Network Path:</span>
+              <span className="font-mono text-slate-200">{formatCandidateType(stats?.candidateType)}</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-400">
+              <span>TURN Relay Server:</span>
+              <span className={`font-mono ${hasTurnServer ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {hasTurnServer ? 'Configured (Active)' : 'STUN Only (No TURN)'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-slate-400">
               <span>Dynamic Renegotiation:</span>
               <span className="font-mono text-sky-400 flex items-center gap-1">
                 <Zap className="w-3.5 h-3.5" /> Perfect Negotiation
               </span>
             </div>
           </div>
+
+          {!hasTurnServer && (
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-200 leading-relaxed">
+              Chưa cấu hình TURN Server trên máy chủ. Các cuộc gọi cùng mạng hoặc NAT mở hoạt động bình thường, nhưng kết nối giữa <strong>WiFi ↔ 4G</strong> hoặc <strong>WiFi trường học/công ty</strong> có thể bị chặn bởi Firewall nếu thiếu TURN.
+            </div>
+          )}
         </div>
 
         {/* Footer */}

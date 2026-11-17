@@ -12,6 +12,14 @@
 export type CameraType = 'physical' | 'screen';
 
 /**
+ * Chế độ chất lượng phát đi của một luồng video:
+ * - 'high': Tối đa 1080p FHD @ 30fps, 3.5 Mbps (Khi được ghim tiêu điểm - Spotlight Pin)
+ * - 'grid': Tiêu chuẩn 720p HD @ 24fps, 1.2 Mbps (Trạng thái lưới mặc định không ghim - chống nóng máy)
+ * - 'low': Tiết kiệm 360p @ 15fps, 300 kbps (Ô thu nhỏ phụ khi một ô khác đang được ghim)
+ */
+export type VideoQualityMode = 'high' | 'grid' | 'low';
+
+/**
  * Nguồn camera cục bộ (Local Camera):
  * Đại diện cho một luồng video đang được phát từ phía máy của người dùng.
  */

@@ -63,6 +63,8 @@ export const Room: React.FC<RoomProps> = ({
     chatMessages,
     sendMessage,
     stats,
+    hasTurnServer,
+    iceConnectionState,
     localQualityModes,
     sendPinStateUpdate
   } = useWebRTC(roomId, userName);
@@ -284,6 +286,18 @@ export const Room: React.FC<RoomProps> = ({
         </div>
       </header>
 
+      {/* Cảnh báo khi ICE kết nối P2P thất bại qua mạng khác nhau (4G / Firewall) */}
+      {isPeerConnected && iceConnectionState === 'failed' && (
+        <div className="px-4 py-2 bg-rose-500/15 border-b border-rose-500/30 text-rose-200 text-xs flex items-center justify-center gap-2 shrink-0 z-10">
+          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>
+            {hasTurnServer
+              ? 'Kết nối mạng P2P/TURN bị gián đoạn. Đang tự động thử kết nối lại...'
+              : 'Không thể thiết lập đường truyền video qua mạng khác nhau (4G / Wifi trường học, công ty) do máy chủ chưa cấu hình TURN Server.'}
+          </span>
+        </div>
+      )}
+
       {/* Main Workspace (Video Grid + Optional Chat Drawer) */}
       <div className="flex-1 flex min-h-0 relative overflow-hidden">
         <VideoGrid
@@ -350,6 +364,8 @@ export const Room: React.FC<RoomProps> = ({
         roomId={roomId}
         isPolite={isPolite}
         peerConnected={isPeerConnected}
+        hasTurnServer={hasTurnServer}
+        iceConnectionState={iceConnectionState}
       />
     </div>
   );

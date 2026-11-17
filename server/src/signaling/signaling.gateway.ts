@@ -28,8 +28,8 @@ import { CameraMetaPayload, ChatMessagePayload } from '../types';
     origin: '*',
     methods: ['GET', 'POST']
   },
-  pingInterval: 10000,
-  pingTimeout: 5000
+  pingInterval: 20000,
+  pingTimeout: 20000
 })
 export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -84,14 +84,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       `[SignalingGateway] ${client.id} (${userName}) vào phòng [${cleanRoomId}]. isPolite=${participant.isPolite}. Sĩ số: ${room.participants.size}/2`
     );
 
-    // Thông báo cho người đang có trong phòng biết có người mới vào
-    client.to(cleanRoomId).emit('peer-joined', {
-      peerId: client.id,
-      peerName: userName,
-      isPolite: participant.isPolite
-    });
-
-    // Cung cấp danh sách các peer có sẵn cho người mới
+    // Cung cấp danh sách các peer có sẵn cho người mới TRƯỚC khi báo cho peer cũ biết,
+    // đảm bảo người vào sau kịp khởi tạo RTCPeerConnection trước khi nhận Offer đầu tiên.
     const existingPeers = Array.from(room.participants.values())
       .filter(p => p.id !== client.id)
       .map(p => ({
@@ -107,6 +101,13 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       yourId: client.id,
       isPolite: participant.isPolite,
       peers: existingPeers
+    });
+
+    // Thông báo cho người đang có trong phòng biết có người mới vào
+    client.to(cleanRoomId).emit('peer-joined', {
+      peerId: client.id,
+      peerName: userName,
+      isPolite: participant.isPolite
     });
   }
 

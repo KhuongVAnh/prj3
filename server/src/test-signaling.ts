@@ -232,7 +232,85 @@ async function runSignalingTest() {
     });
 
     alice.disconnect();
-    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (8/8) ---');
+
+    // -------------------------------------------------------------
+    // [Test 9] Host already has camera ON before Guest joins + Pin Sync
+    // -------------------------------------------------------------
+    console.log('[Test 9] Host pre-existing camera before late-joiner enters & Pin state relay...');
+    const host: ClientSocketType = ClientSocket(url);
+    await new Promise<void>((resolve, reject) => {
+      host.on('connect', () => {
+        host.emit('join-room', { roomId: 'test-room-late-join', userName: 'Host' });
+      });
+      host.on('room-joined', () => {
+        host.emit('camera-state-update', {
+          cameras: [{ cameraId: 'physical-cam-host', trackId: 't-1', streamId: 's-1', label: 'Host 1080p Cam', type: 'physical' }]
+        });
+        setTimeout(resolve, 100);
+      });
+      setTimeout(() => reject(new Error('Host setup timeout')), 3000);
+    });
+
+    const guest: ClientSocketType = ClientSocket(url);
+    await new Promise<void>((resolve, reject) => {
+      let guestSawPreExistingCam = false;
+      let hostGotPin = false;
+
+      guest.on('connect', () => {
+        guest.emit('join-room', { roomId: 'test-room-late-join', userName: 'Guest' });
+      });
+
+      guest.on('room-joined', (data) => {
+        const preCams = data.peers?.[0]?.cameras || [];
+        if (preCams.length === 1 && preCams[0].cameraId === 'physical-cam-host') {
+          guestSawPreExistingCam = true;
+          console.log('✓ Guest received Host pre-existing camera metadata on room-joined');
+          guest.emit('pin-state-update', { pinnedCameraId: 'physical-cam-host' });
+        } else {
+          reject(new Error(`Guest missed pre-existing cameras: ${JSON.stringify(data)}`));
+        }
+      });
+
+      host.on('peer-pin-updated', (data) => {
+        if (data.pinnedCameraId === 'physical-cam-host') {
+          hostGotPin = true;
+          console.log('✓ Host received pin-state-update relay from Guest');
+          if (guestSawPreExistingCam && hostGotPin) resolve();
+        }
+      });
+
+      setTimeout(() => reject(new Error('Late-joiner test timeout')), 3000);
+    });
+
+    guest.disconnect();
+    host.disconnect();
+
+    // -------------------------------------------------------------
+    // [Test 10] GET /api/ice-servers (STUN default & TURN env configuration)
+    // -------------------------------------------------------------
+    console.log('[Test 10] Testing GET /api/ice-servers...');
+    const stunRes = await fetch(`${url}/api/ice-servers`);
+    const stunJson: any = await stunRes.json();
+    if (!stunRes.ok || stunJson.hasTurn !== false || !Array.isArray(stunJson.iceServers) || stunJson.iceServers.length === 0) {
+      throw new Error(`Unexpected default /api/ice-servers response: ${JSON.stringify(stunJson)}`);
+    }
+    console.log(`✓ Default /api/ice-servers returned ${stunJson.iceServers.length} STUN servers (hasTurn=false)`);
+
+    process.env.TURN_URLS = 'turn:example.turn.server:443?transport=tcp,turns:example.turn.server:443?transport=tcp';
+    process.env.TURN_USERNAME = 'testuser';
+    process.env.TURN_CREDENTIAL = 'testpass';
+    const turnRes = await fetch(`${url}/api/ice-servers`);
+    const turnJson: any = await turnRes.json();
+    delete process.env.TURN_URLS;
+    delete process.env.TURN_USERNAME;
+    delete process.env.TURN_CREDENTIAL;
+
+    if (!turnRes.ok || turnJson.hasTurn !== true || turnJson.provider !== 'custom') {
+      throw new Error(`Unexpected TURN /api/ice-servers response: ${JSON.stringify(turnJson)}`);
+    }
+    console.log(`✓ Configured /api/ice-servers returned ${turnJson.iceServers.length} ICE servers (hasTurn=true, provider=custom)`);
+
+    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (10/10) ---');
   } finally {
     await app.close();
   }

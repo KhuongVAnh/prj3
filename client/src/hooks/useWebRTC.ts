@@ -30,7 +30,15 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { CameraSource, RemoteCameraStream, CameraMeta, PeerInfo, ChatMessage, WebRTCStats } from '../types';
+import {
+  CameraSource,
+  RemoteCameraStream,
+  CameraMeta,
+  PeerInfo,
+  ChatMessage,
+  WebRTCStats,
+  VideoQualityMode
+} from '../types';
 import { ICE_SERVERS } from '../constants/webrtc';
 
 export function useWebRTC(roomId: string, userName: string) {
@@ -58,9 +66,11 @@ export function useWebRTC(roomId: string, userName: string) {
   // Tin nhắn chat và thông số đo kiểm mạng
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [stats, setStats] = useState<WebRTCStats | null>(null);
+  const [hasTurnServer, setHasTurnServer] = useState<boolean>(false);
+  const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState>('new');
 
-  // Trạng thái chất lượng phát đi hiện tại của từng camera máy mình: Map cameraId -> 'high' | 'low'
-  const [localQualityModes, setLocalQualityModes] = useState<Record<string, 'high' | 'low'>>({});
+  // Trạng thái chất lượng phát đi hiện tại của từng camera máy mình: Map cameraId -> 'high' | 'grid' | 'low'
+  const [localQualityModes, setLocalQualityModes] = useState<Record<string, VideoQualityMode>>({});
 
   /**
    * CÁC THAM CHIẾU (REFS) QUẢN LÝ TÀI NGUYÊN BẤT ĐỒNG BỘ:
@@ -80,11 +90,19 @@ export function useWebRTC(roomId: string, userName: string) {
   // Các biến cờ trạng thái phục vụ cỗ máy W3C Perfect Negotiation
   const isPoliteRef = useRef<boolean>(false);
   const makingOfferRef = useRef<boolean>(false); // Đang trong quá trình tạo Offer cục bộ
+  const makingOfferPromiseRef = useRef<Promise<void> | null>(null); // Promise đang tạo Offer để đồng bộ hóa va chạm
+  const signalingQueueRef = useRef<Promise<void>>(Promise.resolve()); // Hàng đợi tuần tự xử lý Offer/Answer tránh race condition
   const ignoreOfferRef = useRef<boolean>(false); // Cờ bỏ qua Offer đối phương nếu xảy ra xung đột (dành cho Impolite)
   const isSettingRemoteAnswerPendingRef = useRef<boolean>(false); // Đang chờ áp dụng Remote Answer
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]); // Hàng đợi chứa các gói ICE đến sớm trước khi có Remote Description
+  const pendingOfferRef = useRef<{ senderId: string; offer: RTCSessionDescriptionInit; camerasMeta?: CameraMeta[] } | null>(null);
   const remoteCameraMetaRef = useRef<CameraMeta[]>([]); // Bảng metadata camera của người bên kia
   const remotePinnedCameraIdRef = useRef<string | null>(null); // ID camera máy mình mà đối phương đang ghim tiêu điểm
+  const iceServersConfigRef = useRef<RTCConfiguration>(ICE_SERVERS);
+  const iceFetchPromiseRef = useRef<Promise<void> | null>(null);
+  const pcInitPromiseRef = useRef<Promise<RTCPeerConnection | null> | null>(null);
+  const pcSessionIdRef = useRef<number>(0);
+  const iceRestartAttemptedRef = useRef<boolean>(false);
 
   // Giữ cho peerInfoRef luôn đồng bộ giá trị mới nhất
   useEffect(() => {
@@ -237,10 +255,11 @@ export function useWebRTC(roomId: string, userName: string) {
 
   /**
    * ÁP DỤNG THÔNG SỐ CHẤT LƯỢNG MÃ HÓA (BITRATE / SCALE / FPS) CHO SENDER:
-   * - 'high': Giữ nguyên độ phân giải gốc, 30 FPS, tối đa 2.5 Mbps (Ưu tiên độ nét - Pinned / Full view)
-   * - 'low': Thu nhỏ độ phân giải 2 lần (~360p), 15 FPS, tối đa 300 kbps (Ưu tiên tiết kiệm mạng - Thumbnail)
+   * - 'high': Giữ nguyên độ phân giải gốc (1080p FHD), 30 FPS, 3.5 Mbps (Chỉ khi được GHIM tiêu điểm)
+   * - 'grid': Tự động chia tỉ lệ về 720p HD (nếu nguồn > 720p), 24 FPS, 1.2 Mbps (Trạng thái lưới mặc định - chống nóng máy)
+   * - 'low':  Thu nhỏ về ~360p, 15 FPS, 300 kbps (Ô thu nhỏ phụ khi một ô khác đang được ghim)
    */
-  const applyEncodingQuality = useCallback(async (cameraId: string, mode: 'high' | 'low') => {
+  const applyEncodingQuality = useCallback(async (cameraId: string, mode: VideoQualityMode) => {
     const sender = cameraSendersRef.current.get(cameraId);
     if (!sender) return;
 
@@ -250,13 +269,22 @@ export function useWebRTC(roomId: string, userName: string) {
         params.encodings = [{}];
       }
 
+      const trackHeight = sender.track?.getSettings?.().height || 0;
+
       if (mode === 'high') {
         params.encodings[0].scaleResolutionDownBy = 1.0;
         params.encodings[0].maxBitrate = 3_500_000;
         params.encodings[0].maxFramerate = 30;
         params.degradationPreference = 'maintain-resolution';
+      } else if (mode === 'grid') {
+        const gridScale = trackHeight > 720 ? Math.max(1.0, trackHeight / 720) : 1.0;
+        params.encodings[0].scaleResolutionDownBy = Number(gridScale.toFixed(2));
+        params.encodings[0].maxBitrate = 1_200_000;
+        params.encodings[0].maxFramerate = 24;
+        params.degradationPreference = 'balanced';
       } else {
-        params.encodings[0].scaleResolutionDownBy = 2.0;
+        const lowScale = trackHeight > 360 ? Math.max(2.0, trackHeight / 360) : 2.0;
+        params.encodings[0].scaleResolutionDownBy = Number(lowScale.toFixed(2));
         params.encodings[0].maxBitrate = 300_000;
         params.encodings[0].maxFramerate = 15;
         params.degradationPreference = 'maintain-framerate';
@@ -401,11 +429,15 @@ export function useWebRTC(roomId: string, userName: string) {
       setLocalCameras(localCamerasRef.current);
 
       // Nạp track của camera vào kết nối RTCPeerConnection duy nhất
-      if (pcRef.current) {
+      if (pcRef.current && pcRef.current.signalingState !== 'closed') {
         const sender = pcRef.current.addTrack(track, stream);
         cameraSendersRef.current.set(cameraId, sender); // Lưu lại bộ phát để sau này gỡ bỏ khi tắt camera
-        // Khởi tạo chất lượng ban đầu theo trạng thái ghim của đối phương
-        const initialQuality = (!remotePinnedCameraIdRef.current || remotePinnedCameraIdRef.current === cameraId) ? 'high' : 'low';
+        // Khởi tạo chất lượng ban đầu: không có ghim -> 'grid' (720p), đang ghim đúng cam này -> 'high' (1080p), ghim cam khác -> 'low' (360p)
+        const initialQuality: VideoQualityMode = !remotePinnedCameraIdRef.current
+          ? 'grid'
+          : remotePinnedCameraIdRef.current === cameraId
+          ? 'high'
+          : 'low';
         applyEncodingQuality(cameraId, initialQuality);
       }
 
@@ -484,10 +516,14 @@ export function useWebRTC(roomId: string, userName: string) {
       localCamerasRef.current = [...localCamerasRef.current, newCam];
       setLocalCameras(localCamerasRef.current);
 
-      if (pcRef.current) {
+      if (pcRef.current && pcRef.current.signalingState !== 'closed') {
         const sender = pcRef.current.addTrack(track, stream);
         cameraSendersRef.current.set(cameraId, sender);
-        const initialQuality = (!remotePinnedCameraIdRef.current || remotePinnedCameraIdRef.current === cameraId) ? 'high' : 'low';
+        const initialQuality: VideoQualityMode = !remotePinnedCameraIdRef.current
+          ? 'grid'
+          : remotePinnedCameraIdRef.current === cameraId
+          ? 'high'
+          : 'low';
         applyEncodingQuality(cameraId, initialQuality);
       }
 
@@ -516,9 +552,9 @@ export function useWebRTC(roomId: string, userName: string) {
 
   /**
    * XỬ LÝ TÍN HIỆU TIÊU ĐIỂM (PIN) TỪ ĐỐI PHƯƠNG:
-   * - Nếu đối phương ghim 1 camera của mình: Camera đó được nâng lên High, tất cả camera khác của mình hạ xuống Low.
-   * - Nếu đối phương bỏ ghim (null): Tất cả camera của mình tự khôi phục về High (mặc định lưới cân bằng).
-   * - Nếu đối phương ghim camera của chính họ: Tất cả camera của mình hạ xuống Low (vì đối phương đang xem ở thumbnail).
+   * - Nếu đối phương ghim 1 camera của mình: Camera đó được nâng lên High (1080p), tất cả camera khác hạ xuống Low (360p).
+   * - Nếu đối phương bỏ ghim (null): Tất cả camera của mình chuyển về Grid (720p) để tránh nóng máy.
+   * - Nếu đối phương ghim camera của chính họ: Tất cả camera của mình hạ xuống Low (360p).
    */
   const handleRemotePinUpdate = useCallback((pinnedCameraId: string | null) => {
     remotePinnedCameraIdRef.current = pinnedCameraId;
@@ -526,13 +562,13 @@ export function useWebRTC(roomId: string, userName: string) {
 
     localCamerasRef.current.forEach(cam => {
       if (!pinnedCameraId) {
-        // Không ai bị ghim: Tất cả về High
-        applyEncodingQuality(cam.id, 'high');
+        // Không ai bị ghim: Tất cả về Grid (720p) chống quá nhiệt
+        applyEncodingQuality(cam.id, 'grid');
       } else if (cam.id === pinnedCameraId) {
-        // Đúng camera máy mình đang được ghim: Nâng lên High
+        // Đúng camera máy mình đang được ghim: Nâng lên High (1080p)
         applyEncodingQuality(cam.id, 'high');
       } else {
-        // Camera không được ghim: Hạ xuống Low để giảm tải bên nhận
+        // Camera không được ghim: Hạ xuống Low (360p) để giảm tải bên nhận
         applyEncodingQuality(cam.id, 'low');
       }
     });
@@ -572,39 +608,200 @@ export function useWebRTC(roomId: string, userName: string) {
     audioElem.autoplay = true;
     remoteAudioElemRef.current = audioElem;
 
+    // Tải trước cấu hình STUN/TURN từ backend (/api/ice-servers) ngay khi vào phòng
+    const fetchIceConfig = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch('/api/ice-servers', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.iceServers) && data.iceServers.length > 0) {
+            iceServersConfigRef.current = {
+              iceServers: data.iceServers,
+              iceCandidatePoolSize: 10
+            };
+            setHasTurnServer(Boolean(data.hasTurn));
+            console.log(`[WebRTC] Đã tải ICE config (${data.provider}, hasTurn=${Boolean(data.hasTurn)})`);
+          }
+        }
+      } catch (err) {
+        console.warn('[WebRTC] Không thể tải /api/ice-servers, dùng STUN mặc định:', err);
+      }
+    };
+    iceFetchPromiseRef.current = fetchIceConfig();
+
+    /**
+     * Đẩy toàn bộ các gói ICE Candidate đang xếp hàng vào RTCPeerConnection
+     */
+    const flushIceCandidateQueue = async (pc: RTCPeerConnection) => {
+      while (iceCandidateQueueRef.current.length > 0) {
+        const cand = iceCandidateQueueRef.current.shift();
+        if (cand && pc.signalingState !== 'closed') {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {
+            console.warn('[WebRTC] Lỗi thêm ICE candidate trong hàng đợi:', e);
+          }
+        }
+      }
+    };
+
+    /**
+     * Tạo và gửi SDP Offer an toàn (chống chồng chéo khi signalingState chưa stable)
+     */
+    const scheduleNegotiation = (pc: RTCPeerConnection, sessionId: number) => {
+      if (
+        sessionId !== pcSessionIdRef.current ||
+        pc.signalingState !== 'stable' ||
+        makingOfferRef.current
+      ) {
+        return;
+      }
+
+      const offerPromise = (async () => {
+        try {
+          makingOfferRef.current = true;
+          if (sessionId !== pcSessionIdRef.current || pc.signalingState !== 'stable') {
+            return;
+          }
+          await pc.setLocalDescription(); // Tạo SDP Offer mới (chứa nhiều m=video)
+          if (sessionId !== pcSessionIdRef.current) return;
+
+          if (pc.localDescription && pc.localDescription.type === 'offer') {
+            console.log('[WebRTC] Tự động gửi SDP Offer từ sự kiện onnegotiationneeded');
+            socketRef.current?.emit('signal-offer', {
+              offer: pc.localDescription,
+              camerasMeta: getLocalCamerasMeta() // Đính kèm metadata camera để phía nhận biết thông tin
+            });
+          }
+        } catch (err) {
+          console.error('[WebRTC] Lỗi trong quá trình onnegotiationneeded:', err);
+        } finally {
+          makingOfferRef.current = false;
+          makingOfferPromiseRef.current = null;
+        }
+      })();
+
+      makingOfferPromiseRef.current = offerPromise;
+    };
+
+    /**
+     * Xử lý SDP Offer đến theo hàng đợi tuần tự (W3C Perfect Negotiation không xung đột)
+     */
+    const enqueueIncomingOffer = (
+      senderId: string,
+      offer: RTCSessionDescriptionInit,
+      camerasMeta?: CameraMeta[]
+    ) => {
+      signalingQueueRef.current = signalingQueueRef.current.then(async () => {
+        if (pcInitPromiseRef.current) {
+          await pcInitPromiseRef.current;
+        }
+
+        const pc = pcRef.current;
+        if (!pc || pc.signalingState === 'closed') {
+          pendingOfferRef.current = { senderId, offer, camerasMeta };
+          return;
+        }
+        const sessionId = pcSessionIdRef.current;
+
+        if (camerasMeta) {
+          updateRemoteCameraMeta(camerasMeta);
+        }
+
+        try {
+          // Nếu đang dở tạo Offer cục bộ, Impolite bỏ qua ngay, Polite chờ tạo xong rồi mới kiểm tra va chạm
+          if (makingOfferPromiseRef.current) {
+            if (!isPoliteRef.current) {
+              ignoreOfferRef.current = true;
+              console.log('[WebRTC] Va chạm đàm phán (Glare): Impolite đang tạo Offer nên bỏ qua Offer đến');
+              return;
+            }
+            await makingOfferPromiseRef.current;
+          }
+
+          if (sessionId !== pcSessionIdRef.current || pcRef.current !== pc) return;
+
+          const readyForOffer =
+            !makingOfferRef.current &&
+            (pc.signalingState === 'stable' || isSettingRemoteAnswerPendingRef.current);
+          const offerCollision = !readyForOffer;
+
+          // NẾU LÀ IMPOLITE (Chủ động): Bỏ qua Offer từ đối phương khi va chạm
+          ignoreOfferRef.current = !isPoliteRef.current && offerCollision;
+          if (ignoreOfferRef.current) {
+            console.log('[WebRTC] Va chạm đàm phán (Glare): Máy chủ động (Impolite) bỏ qua Offer của đối phương');
+            return;
+          }
+
+          // NẾU LÀ POLITE (Nhường nhịn): Chủ động rollback Offer của mình về trạng thái stable
+          if (offerCollision && isPoliteRef.current && pc.signalingState === 'have-local-offer') {
+            console.log('[WebRTC] Va chạm đàm phán (Glare): Máy nhường nhịn (Polite) rollback local offer để nhận remote offer');
+            try {
+              await pc.setLocalDescription({ type: 'rollback' });
+            } catch (e) {
+              console.warn('[WebRTC] Lỗi rollback:', e);
+            }
+          }
+
+          // Áp dụng mô tả từ đối phương
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+          // Xử lý các gói ICE candidate đã xếp hàng đợi trước đó
+          await flushIceCandidateQueue(pc);
+
+          // Tạo SDP Answer để trả lời đối phương
+          if (offer.type === 'offer') {
+            await pc.setLocalDescription();
+            console.log('[WebRTC] Gửi SDP Answer phản hồi về', senderId);
+            socketInstance.emit('signal-answer', {
+              targetId: senderId,
+              answer: pc.localDescription,
+              camerasMeta: getLocalCamerasMeta()
+            });
+          }
+        } catch (err) {
+          console.error('[WebRTC] Lỗi xử lý signal-offer:', err);
+        }
+      });
+    };
+
     /**
      * HÀM THIẾT LẬP KẾT NỐI RTCPeerConnection DUY NHẤT:
-     * Cấu hình STUN servers, gắn các track âm thanh, các camera cục bộ và đăng ký các sự kiện mạng.
+     * Chờ ICE/TURN config sẵn sàng, đăng ký toàn bộ sự kiện TRƯỚC khi addTrack
+     * để đảm bảo các camera đã bật trước khi peer vào sau luôn được đàm phán đầy đủ.
      */
-    const setupPeerConnection = () => {
+    const setupPeerConnection = async (): Promise<RTCPeerConnection | null> => {
+      const sessionId = ++pcSessionIdRef.current;
+
       if (pcRef.current) {
         try { pcRef.current.close(); } catch (_) {}
+        pcRef.current = null;
       }
       cameraSendersRef.current.clear();
       audioSenderRef.current = null;
-      iceCandidateQueueRef.current = [];
+      makingOfferRef.current = false;
+      makingOfferPromiseRef.current = null;
+      ignoreOfferRef.current = false;
+      isSettingRemoteAnswerPendingRef.current = false;
+      iceRestartAttemptedRef.current = false;
+      remotePinnedCameraIdRef.current = null;
 
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      pcRef.current = pc;
-
-      // 1. Gắn luồng âm thanh Micro (nếu đã bật)
-      const audioStream = localAudioStreamRef.current;
-      const audioTrack = localAudioTrackRef.current;
-      if (audioTrack && audioTrack.readyState === 'live') {
-        const stream = audioStream || new MediaStream([audioTrack]);
-        audioSenderRef.current = pc.addTrack(audioTrack, stream);
+      if (iceFetchPromiseRef.current) {
+        await iceFetchPromiseRef.current;
       }
 
-      // 2. Gắn TẤT CẢ các camera cục bộ đang hoạt động vào kết nối này
-      localCamerasRef.current.forEach(cam => {
-        const track = cam.stream.getVideoTracks()[0];
-        if (track && track.readyState === 'live') {
-          const sender = pc.addTrack(track, cam.stream);
-          cameraSendersRef.current.set(cam.id, sender);
-        }
-      });
+      if (sessionId !== pcSessionIdRef.current) {
+        return null;
+      }
 
-      // 3. Sự kiện thu thập ứng viên mạng ICE Candidate và gửi sang đối phương
+      const pc = new RTCPeerConnection(iceServersConfigRef.current);
+      pcRef.current = pc;
+      setIceConnectionState(pc.iceConnectionState);
+
+      // 1. Sự kiện thu thập ứng viên mạng ICE Candidate và gửi sang đối phương
       pc.onicecandidate = (event) => {
         if (event.candidate && socketRef.current) {
           socketRef.current.emit('signal-ice-candidate', { candidate: event.candidate });
@@ -612,28 +809,35 @@ export function useWebRTC(roomId: string, userName: string) {
       };
 
       /**
-       * 4. SỰ KIỆN TỰ ĐỘNG TÁI ĐÀM PHÁN (W3C Perfect Negotiation Pattern):
-       * Bất cứ khi nào gọi addTrack hoặc removeTrack, sự kiện này tự động kích hoạt
-       * để sinh ra SDP Offer mới chứa đầy đủ các khối m=video và gửi qua Signaling.
+       * 2. SỰ KIỆN TỰ ĐỘNG TÁI ĐÀM PHÁN (W3C Perfect Negotiation Pattern):
        */
-      pc.onnegotiationneeded = async () => {
-        try {
-          makingOfferRef.current = true;
-          await pc.setLocalDescription(); // Tạo SDP Offer mới (chứa nhiều m=video)
-          console.log('[WebRTC] Tự động gửi SDP Offer từ sự kiện onnegotiationneeded');
-          socketRef.current?.emit('signal-offer', {
-            offer: pc.localDescription,
-            camerasMeta: getLocalCamerasMeta() // Đính kèm metadata camera để phía nhận biết thông tin
+      pc.onnegotiationneeded = () => {
+        scheduleNegotiation(pc, sessionId);
+      };
+
+      /**
+       * Đảm bảo không bỏ sót track nào nếu track được thêm trong lúc signalingState !== 'stable'
+       */
+      pc.onsignalingstatechange = () => {
+        if (sessionId !== pcSessionIdRef.current) return;
+        if (pc.signalingState === 'stable') {
+          const hasUnnegotiatedSender = pc.getTransceivers().some(t => {
+            if (!t.sender.track || t.sender.track.readyState !== 'live') return false;
+            if (t.mid === null) return true;
+            return (
+              (t.direction === 'sendrecv' || t.direction === 'sendonly') &&
+              t.currentDirection !== 'sendrecv' &&
+              t.currentDirection !== 'sendonly'
+            );
           });
-        } catch (err) {
-          console.error('[WebRTC] Lỗi trong quá trình onnegotiationneeded:', err);
-        } finally {
-          makingOfferRef.current = false;
+          if (hasUnnegotiatedSender) {
+            queueMicrotask(() => scheduleNegotiation(pc, sessionId));
+          }
         }
       };
 
       /**
-       * 5. SỰ KIỆN ĐÓN NHẬN LUỒNG TỪ XA (pc.ontrack):
+       * 3. SỰ KIỆN ĐÓN NHẬN LUỒNG TỪ XA (pc.ontrack):
        * Kích hoạt độc lập cho TỪNG camera và audio mà đối phương gửi đến trên cùng đường truyền.
        */
       pc.ontrack = (event) => {
@@ -685,9 +889,59 @@ export function useWebRTC(roomId: string, userName: string) {
         }
       };
 
+      pc.oniceconnectionstatechange = () => {
+        if (sessionId !== pcSessionIdRef.current) return;
+        setIceConnectionState(pc.iceConnectionState);
+        console.log(`[WebRTC] ICE connection state: ${pc.iceConnectionState}`);
+
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          iceRestartAttemptedRef.current = false;
+          // Đảm bảo thông số chất lượng (mặc định 720p ở trạng thái grid) được áp dụng chắc chắn sau khi nối mạng
+          localCamerasRef.current.forEach(cam => {
+            const targetMode: VideoQualityMode = !remotePinnedCameraIdRef.current
+              ? 'grid'
+              : remotePinnedCameraIdRef.current === cam.id
+              ? 'high'
+              : 'low';
+            applyEncodingQuality(cam.id, targetMode);
+          });
+        } else if (pc.iceConnectionState === 'failed' && !iceRestartAttemptedRef.current) {
+          iceRestartAttemptedRef.current = true;
+          console.warn('[WebRTC] ICE bị failed, thử ICE Restart tự động...');
+          if (typeof pc.restartIce === 'function') {
+            pc.restartIce();
+          }
+        }
+      };
+
       pc.onconnectionstatechange = () => {
         console.log(`[WebRTC] Trạng thái kết nối mạng: ${pc.connectionState}`);
       };
+
+      // 4. Gắn luồng âm thanh Micro (nếu đã bật trước khi peer vào)
+      const audioStream = localAudioStreamRef.current;
+      const audioTrack = localAudioTrackRef.current;
+      if (audioTrack && audioTrack.readyState === 'live') {
+        const stream = audioStream || new MediaStream([audioTrack]);
+        audioSenderRef.current = pc.addTrack(audioTrack, stream);
+      }
+
+      // 5. Gắn TẤT CẢ các camera cục bộ đang hoạt động vào kết nối này (ở chế độ 720p grid mặc định)
+      localCamerasRef.current.forEach(cam => {
+        const track = cam.stream.getVideoTracks()[0];
+        if (track && track.readyState === 'live') {
+          const sender = pc.addTrack(track, cam.stream);
+          cameraSendersRef.current.set(cam.id, sender);
+          applyEncodingQuality(cam.id, 'grid');
+        }
+      });
+
+      // Xử lý Offer đến sớm (nếu có) trước khi PeerConnection khởi tạo xong
+      if (pendingOfferRef.current) {
+        const queued = pendingOfferRef.current;
+        pendingOfferRef.current = null;
+        enqueueIncomingOffer(queued.senderId, queued.offer, queued.camerasMeta);
+      }
 
       return pc;
     };
@@ -728,7 +982,7 @@ export function useWebRTC(roomId: string, userName: string) {
         peerInfoRef.current = pInfo;
         setPeerInfo(pInfo);
         remoteCameraMetaRef.current = peer.cameras || [];
-        setupPeerConnection(); // Khởi tạo PeerConnection
+        pcInitPromiseRef.current = setupPeerConnection(); // Khởi tạo PeerConnection
       }
     });
 
@@ -744,123 +998,68 @@ export function useWebRTC(roomId: string, userName: string) {
       };
       peerInfoRef.current = pInfo;
       setPeerInfo(pInfo);
+      iceCandidateQueueRef.current = [];
+      pendingOfferRef.current = null;
 
       // Người vào trước (Impolite Initiator) chuẩn bị kết nối và gửi Offer đầu tiên
-      setupPeerConnection();
+      pcInitPromiseRef.current = setupPeerConnection();
     });
 
     /**
      * XỬ LÝ NHẬN SDP OFFER TỪ ĐỐI PHƯƠNG (Giải quyết xung đột Glare Collision):
      */
-    socketInstance.on('signal-offer', async ({ senderId, offer, camerasMeta }) => {
-      const pc = pcRef.current;
-      if (!pc) return;
-
-      if (camerasMeta) {
-        updateRemoteCameraMeta(camerasMeta);
-      }
-
-      try {
-        // Kiểm tra xem máy này có đang bận tạo Offer hay đang trong trạng thái sẵn sàng nhận Offer không
-        const readyForOffer =
-          !makingOfferRef.current &&
-          (pc.signalingState === 'stable' || isSettingRemoteAnswerPendingRef.current);
-        const offerCollision = !readyForOffer; // Xảy ra va chạm đàm phán (Glare Condition)!
-
-        // NẾU LÀ IMPOLITE (Chủ động): Bỏ qua Offer từ đối phương khi va chạm
-        ignoreOfferRef.current = !isPoliteRef.current && offerCollision;
-        if (ignoreOfferRef.current) {
-          console.log('[WebRTC] Va chạm đàm phán (Glare): Máy chủ động (Impolite) bỏ qua Offer của đối phương');
-          return;
-        }
-
-        // NẾU LÀ POLITE (Nhường nhịn): Chủ động rollback Offer của mình về trạng thái stable
-        if (offerCollision && isPoliteRef.current) {
-          console.log('[WebRTC] Va chạm đàm phán (Glare): Máy nhường nhịn (Polite) rollback local offer để nhận remote offer');
-          if (pc.signalingState === 'have-local-offer') {
-            try {
-              await pc.setLocalDescription({ type: 'rollback' }); // Hủy Offer của mình
-            } catch (e) {
-              console.warn('[WebRTC] Lỗi rollback:', e);
-            }
-          }
-        }
-
-        // Áp dụng mô tả từ đối phương
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-        // Xử lý các gói ICE candidate đã xếp hàng đợi trước đó
-        while (iceCandidateQueueRef.current.length > 0) {
-          const cand = iceCandidateQueueRef.current.shift();
-          if (cand) {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
-            } catch (e) {
-              console.warn('[WebRTC] Lỗi thêm ICE candidate trong hàng đợi:', e);
-            }
-          }
-        }
-
-        // Tạo SDP Answer để trả lời đối phương
-        if (offer.type === 'offer') {
-          await pc.setLocalDescription();
-          console.log('[WebRTC] Gửi SDP Answer phản hồi về', senderId);
-          socketInstance.emit('signal-answer', {
-            targetId: senderId,
-            answer: pc.localDescription,
-            camerasMeta: getLocalCamerasMeta()
-          });
-        }
-      } catch (err) {
-        console.error('[WebRTC] Lỗi xử lý signal-offer:', err);
-      }
+    socketInstance.on('signal-offer', ({ senderId, offer, camerasMeta }) => {
+      enqueueIncomingOffer(senderId, offer, camerasMeta);
     });
 
     /**
      * XỬ LÝ NHẬN SDP ANSWER TỪ ĐỐI PHƯƠNG
      */
-    socketInstance.on('signal-answer', async ({ answer, camerasMeta }) => {
-      const pc = pcRef.current;
-      if (!pc) return;
-      try {
+    socketInstance.on('signal-answer', ({ answer, camerasMeta }) => {
+      signalingQueueRef.current = signalingQueueRef.current.then(async () => {
+        if (pcInitPromiseRef.current) {
+          await pcInitPromiseRef.current;
+        }
+        const pc = pcRef.current;
+        if (!pc || pc.signalingState === 'closed') return;
+
         if (camerasMeta) {
           updateRemoteCameraMeta(camerasMeta);
         }
-        isSettingRemoteAnswerPendingRef.current = true;
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        isSettingRemoteAnswerPendingRef.current = false;
 
-        // Xử lý nốt các gói ICE candidate trong hàng đợi
-        while (iceCandidateQueueRef.current.length > 0) {
-          const cand = iceCandidateQueueRef.current.shift();
-          if (cand) {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
-            } catch (e) {
-              console.warn('[WebRTC] Lỗi thêm ICE candidate trong hàng đợi:', e);
-            }
-          }
+        if (pc.signalingState !== 'have-local-offer') {
+          console.warn(`[WebRTC] Bỏ qua signal-answer vì signalingState hiện tại là ${pc.signalingState}`);
+          return;
         }
-      } catch (err) {
-        console.error('[WebRTC] Lỗi xử lý signal-answer:', err);
-      } finally {
-        isSettingRemoteAnswerPendingRef.current = false;
-      }
+
+        try {
+          isSettingRemoteAnswerPendingRef.current = true;
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          isSettingRemoteAnswerPendingRef.current = false;
+
+          // Xử lý nốt các gói ICE candidate trong hàng đợi
+          await flushIceCandidateQueue(pc);
+        } catch (err) {
+          console.error('[WebRTC] Lỗi xử lý signal-answer:', err);
+        } finally {
+          isSettingRemoteAnswerPendingRef.current = false;
+        }
+      });
     });
 
     /**
      * XỬ LÝ NHẬN GÓI ỨNG VIÊN MẠNG ICE CANDIDATE
      */
     socketInstance.on('signal-ice-candidate', async ({ candidate }) => {
+      if (!candidate) return;
       const pc = pcRef.current;
-      if (!pc) return;
+      // Nếu chưa tạo pcRef hoặc chưa có remoteDescription, giữ candidate vào hàng đợi (không làm mất!)
+      if (!pc || !pc.remoteDescription || isSettingRemoteAnswerPendingRef.current) {
+        iceCandidateQueueRef.current.push(candidate);
+        return;
+      }
       try {
-        // Nếu chưa thiết lập remote description xong, đưa candidate vào hàng đợi chờ
-        if (!pc.remoteDescription || isSettingRemoteAnswerPendingRef.current) {
-          iceCandidateQueueRef.current.push(candidate);
-        } else {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        }
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
         if (!ignoreOfferRef.current) {
           console.warn('[WebRTC] Lỗi nạp ICE candidate:', err);
@@ -895,17 +1094,31 @@ export function useWebRTC(roomId: string, userName: string) {
     // Khi đối phương rời phòng họp
     socketInstance.on('peer-left', ({ peerId, peerName }: { peerId: string; peerName: string }) => {
       console.log(`[Socket] Đối phương đã rời phòng: ${peerName} (${peerId})`);
+      pcSessionIdRef.current++;
+      if (pcRef.current) {
+        try { pcRef.current.close(); } catch (_) {}
+        pcRef.current = null;
+      }
+      pcInitPromiseRef.current = null;
+      cameraSendersRef.current.clear();
+      audioSenderRef.current = null;
+      iceCandidateQueueRef.current = [];
+      pendingOfferRef.current = null;
+      remotePinnedCameraIdRef.current = null;
       peerInfoRef.current = null;
       setPeerInfo(null);
       setRemoteCameras([]);
       remoteCameraMetaRef.current = [];
       setRemoteAudioStream(null);
+      setIceConnectionState('new');
+      setStats(null);
+      setLocalQualityModes({});
       if (remoteAudioElemRef.current) remoteAudioElemRef.current.srcObject = null;
     });
 
     /**
      * ĐO KIỂM THÔNG SỐ MẠNG ĐỊNH KỲ (pc.getStats):
-     * Đo RTT, tỉ lệ mất gói, FPS, độ phân giải thực tế của luồng video đang nhận.
+     * Đo RTT, tỉ lệ mất gói, FPS, độ phân giải thực tế và loại kết nối ICE (host/srflx/relay).
      */
     const statsInterval = setInterval(async () => {
       const pc = pcRef.current;
@@ -919,14 +1132,26 @@ export function useWebRTC(roomId: string, userName: string) {
         let rtt = 0;
         let packetsLost = 0;
         let videoBitrate = 0;
-        let fps = 30;
-        let resolution = '1280x720';
+        let fps = 0;
+        let resolution = '';
         let audioBitrate = 0;
+        let selectedPairId: string | undefined;
+        let candidateType: string | undefined;
+        const localCandidates = new Map<string, string>();
+        const candidatePairs = new Map<string, any>();
 
         statsReport.forEach(report => {
-          // Đo độ trễ khứ hồi RTT (Round Trip Time)
-          if (report.type === 'candidate-pair' && report.currentRoundTripTime) {
-            rtt = Math.round(report.currentRoundTripTime * 1000);
+          if (report.type === 'transport' && report.selectedCandidatePairId) {
+            selectedPairId = report.selectedCandidatePairId;
+          }
+          if (report.type === 'local-candidate' && report.candidateType) {
+            localCandidates.set(report.id, report.candidateType);
+          }
+          if (report.type === 'candidate-pair') {
+            candidatePairs.set(report.id, report);
+            if (report.currentRoundTripTime && (report.nominated || report.state === 'succeeded')) {
+              rtt = Math.round(report.currentRoundTripTime * 1000);
+            }
           }
           // Đo số gói video bị rụng (packets lost) và FPS thực tế
           if (report.type === 'inbound-rtp' && report.kind === 'video') {
@@ -938,13 +1163,26 @@ export function useWebRTC(roomId: string, userName: string) {
           }
         });
 
+        const activePair =
+          (selectedPairId && candidatePairs.get(selectedPairId)) ||
+          Array.from(candidatePairs.values()).find(p => p.nominated && p.state === 'succeeded');
+        if (activePair) {
+          if (activePair.currentRoundTripTime) {
+            rtt = Math.round(activePair.currentRoundTripTime * 1000);
+          }
+          if (activePair.localCandidateId) {
+            candidateType = localCandidates.get(activePair.localCandidateId);
+          }
+        }
+
         setStats({
           rtt,
           packetsLost,
           videoBitrate,
-          resolution,
-          fps,
-          audioBitrate
+          resolution: resolution || '1280x720',
+          fps: fps || 24,
+          audioBitrate,
+          candidateType
         });
       } catch (e) {
         // Bỏ qua lỗi thống kê nếu ngắt kết nối đột ngột
@@ -955,6 +1193,7 @@ export function useWebRTC(roomId: string, userName: string) {
      * DỌN DẸP BỘ NHỚ VÀ GIẢI PHÓNG PHẦN CỨNG KHI RỜI PHÒNG (CLEANUP):
      */
     return () => {
+      pcSessionIdRef.current++;
       clearInterval(statsInterval);
       socketInstance.disconnect();
       socketRef.current = null;
@@ -962,6 +1201,9 @@ export function useWebRTC(roomId: string, userName: string) {
         pcRef.current.close();
         pcRef.current = null;
       }
+      pcInitPromiseRef.current = null;
+      iceCandidateQueueRef.current = [];
+      pendingOfferRef.current = null;
       // Tắt tất cả các track webcam để tắt đèn camera
       localCamerasRef.current.forEach(cam => cam.stream.getTracks().forEach(t => t.stop()));
       localCamerasRef.current = [];
@@ -975,7 +1217,7 @@ export function useWebRTC(roomId: string, userName: string) {
         remoteAudioElemRef.current = null;
       }
     };
-  }, [roomId, userName, getLocalCamerasMeta, updateRemoteCameraMeta, handleRemotePinUpdate]);
+  }, [roomId, userName, applyEncodingQuality, getLocalCamerasMeta, updateRemoteCameraMeta, handleRemotePinUpdate]);
 
   return {
     socket,
@@ -999,6 +1241,8 @@ export function useWebRTC(roomId: string, userName: string) {
     chatMessages,
     sendMessage,
     stats,
+    hasTurnServer,
+    iceConnectionState,
     // Pin-adaptive quality
     localQualityModes,
     sendPinStateUpdate,

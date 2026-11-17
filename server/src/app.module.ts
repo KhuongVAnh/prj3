@@ -16,6 +16,7 @@ import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { SignalingModule } from './signaling/signaling.module';
 import { HealthController } from './health/health.controller';
+import { IceModule } from './ice/ice.module';
 
 // Đảm bảo thư mục frontend luôn tồn tại để ServeStaticModule không ném lỗi nếu client chưa build
 const frontendPath = join(__dirname, '..', 'frontend');
@@ -35,7 +36,8 @@ if (!existsSync(frontendPath)) {
         fallthrough: true
       }
     }),
-    SignalingModule
+    SignalingModule,
+    IceModule
   ],
   controllers: [HealthController]
 })

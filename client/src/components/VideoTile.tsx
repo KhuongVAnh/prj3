@@ -28,7 +28,7 @@ import {
   Radio,
   Scaling
 } from 'lucide-react';
-import { CameraType } from '../types';
+import { CameraType, VideoQualityMode } from '../types';
 
 export interface VideoTileProps {
   id: string;                         // ID duy nhất của stream
@@ -40,7 +40,7 @@ export interface VideoTileProps {
   isSpeaking?: boolean;               // Người này có đang phát ra tiếng nói hay không
   isPinned?: boolean;                 // Khung hình có đang được ghim tiêu điểm hay không
   isThumbnail?: boolean;              // Có phải đang hiển thị ở dải thumbnail thu nhỏ hay không
-  qualityMode?: 'high' | 'low';       // Chế độ chất lượng phát ('high': HD | 'low': 360p tiết kiệm)
+  qualityMode?: VideoQualityMode;     // Chế độ chất lượng phát ('high': 1080p | 'grid': 720p | 'low': 360p)
   onTogglePin?: (id: string) => void; // Hàm ghim/bỏ ghim
   onRemove?: () => void;              // Hàm đóng luồng camera này (nếu là camera phụ của mình)
   onAspectRatioChange?: (id: string, ratio: number) => void; // Báo cáo tỉ lệ thực tế của video
@@ -58,7 +58,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   isSpeaking = false,
   isPinned = false,
   isThumbnail = false,
-  qualityMode = 'high',
+  qualityMode = 'grid',
   onTogglePin,
   onRemove,
   onAspectRatioChange,
@@ -86,7 +86,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
     const checkTrackState = () => {
       if (track) {
-        setIsVideoActive(track.enabled && !track.muted);
+        setIsVideoActive(track.enabled && !track.muted && track.readyState !== 'ended');
       } else {
         setIsVideoActive(false);
       }
@@ -111,31 +111,42 @@ export const VideoTile: React.FC<VideoTileProps> = ({
       }
     };
 
+    const handleVideoPlaying = () => {
+      updateResolution();
+      if (track && track.enabled && track.readyState !== 'ended') {
+        setIsVideoActive(true);
+      }
+    };
+
     checkTrackState();
     if (video) {
       video.addEventListener('loadedmetadata', updateResolution);
       video.addEventListener('resize', updateResolution);
+      video.addEventListener('playing', handleVideoPlaying);
+      video.addEventListener('loadeddata', handleVideoPlaying);
       if (video.videoWidth && video.videoHeight) {
         updateResolution();
       }
     }
 
     if (track) {
-      track.onmute = checkTrackState;
-      track.onunmute = checkTrackState;
-      track.onended = checkTrackState;
+      track.addEventListener('mute', checkTrackState);
+      track.addEventListener('unmute', checkTrackState);
+      track.addEventListener('ended', checkTrackState);
     }
 
     return () => {
       if (video) {
         video.removeEventListener('loadedmetadata', updateResolution);
         video.removeEventListener('resize', updateResolution);
+        video.removeEventListener('playing', handleVideoPlaying);
+        video.removeEventListener('loadeddata', handleVideoPlaying);
         video.srcObject = null;
       }
       if (track) {
-        track.onmute = null;
-        track.onunmute = null;
-        track.onended = null;
+        track.removeEventListener('mute', checkTrackState);
+        track.removeEventListener('unmute', checkTrackState);
+        track.removeEventListener('ended', checkTrackState);
       }
     };
   }, [stream, label, id, onAspectRatioChange]);
@@ -229,7 +240,11 @@ export const VideoTile: React.FC<VideoTileProps> = ({
               <span className="truncate max-w-[90px]">{label}</span>
               {qualityMode === 'low' ? (
                 <span className="text-[9px] font-mono px-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {resolution && resolution.height > 0 ? `${resolution.height}p` : '360p'}
+                  {resolution && resolution.height > 0 && resolution.height <= 540 ? `${resolution.height}p` : '360p'}
+                </span>
+              ) : qualityMode === 'grid' ? (
+                <span className="text-[9px] font-mono font-bold px-1 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                  720p
                 </span>
               ) : (
                 <span className="text-[9px] font-mono font-bold px-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -286,7 +301,16 @@ export const VideoTile: React.FC<VideoTileProps> = ({
               {qualityMode === 'low' ? (
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  {resolution && resolution.height > 0 ? `${resolution.height}p • Tiết kiệm` : '360p • Tiết kiệm'}
+                  {resolution && resolution.height > 0 && resolution.height <= 540
+                    ? `${resolution.height}p • Tiết kiệm`
+                    : '360p • Tiết kiệm'}
+                </span>
+              ) : qualityMode === 'grid' ? (
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 shrink-0 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                  {resolution && resolution.height > 0 && resolution.height < 720
+                    ? `${resolution.height}p`
+                    : '720p HD'}
                 </span>
               ) : (
                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 flex items-center gap-1">
@@ -384,7 +408,11 @@ export const VideoTile: React.FC<VideoTileProps> = ({
               <span className="font-semibold tracking-wider text-[10px]">ON AIR</span>
               {resolution && (
                 <span className="text-[10px] text-slate-400 font-mono ml-0.5 border-l border-white/10 pl-1.5 hidden sm:inline">
-                  {resolution.width >= 1920
+                  {isLocal && qualityMode === 'low'
+                    ? '360p TX'
+                    : isLocal && qualityMode === 'grid' && resolution.height > 720
+                    ? '720p TX'
+                    : resolution.width >= 1920
                     ? '1080p'
                     : resolution.width >= 1280
                     ? '720p'

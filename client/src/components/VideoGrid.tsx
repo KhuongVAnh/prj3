@@ -25,7 +25,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CameraSource, RemoteCameraStream } from '../types';
+import { CameraSource, RemoteCameraStream, VideoQualityMode } from '../types';
 import { VideoTile } from './VideoTile';
 import { Video, UserPlus, Sparkles } from 'lucide-react';
 
@@ -36,7 +36,7 @@ export interface VideoGridProps {
   isRemoteSpeaking?: boolean;
   isLocalMuted: boolean;
   pinnedId: string | null;
-  localQualityModes?: Record<string, 'high' | 'low'>;
+  localQualityModes?: Record<string, VideoQualityMode>;
   onTogglePin: (id: string) => void;
   onRemoveLocalCamera: (id: string) => void;
   peerConnected: boolean;
@@ -96,13 +96,13 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [streamRatios, setStreamRatios] = useState<Record<string, number>>({});
 
-  // Xác định chế độ chất lượng (HD hay Tiết kiệm) hiển thị trên từng tile
-  const getQuality = useCallback((id: string, isPinnedTile: boolean, isThumbTile: boolean): 'high' | 'low' => {
+  // Xác định chế độ chất lượng ('high' 1080p khi ghim | 'grid' 720p mặc định | 'low' 360p thu nhỏ)
+  const getQuality = useCallback((id: string, isPinnedTile: boolean, isThumbTile: boolean): VideoQualityMode => {
     if (isPinnedTile) return 'high';
     if (isThumbTile) return 'low';
     if (pinnedId && id !== pinnedId) return 'low';
     if (localQualityModes && localQualityModes[id]) return localQualityModes[id];
-    return 'high';
+    return 'grid';
   }, [pinnedId, localQualityModes]);
 
   // Theo dõi chính xác kích thước vùng chứa VideoGrid để tự co giãn tối ưu
