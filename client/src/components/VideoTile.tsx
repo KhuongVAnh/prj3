@@ -63,10 +63,13 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isVideoActive, setIsVideoActive] = useState(true);
+  const [hasFrame, setHasFrame] = useState<boolean>(isLocal);
   const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
+    setHasFrame(isLocal);
+    setResolution(null);
     const video = videoRef.current;
     if (video && stream) {
       video.srcObject = stream;
@@ -79,9 +82,14 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
     const checkTrackState = () => {
       if (track) {
-        setIsVideoActive(track.enabled && !track.muted && track.readyState !== 'ended');
+        const active = track.enabled && !track.muted && track.readyState !== 'ended';
+        setIsVideoActive(active);
+        if (!active && !isLocal) {
+          setHasFrame(false);
+        }
       } else {
         setIsVideoActive(false);
+        setHasFrame(false);
       }
     };
 
@@ -99,6 +107,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         const w = video.videoWidth;
         const h = video.videoHeight;
         setResolution({ width: w, height: h });
+        setHasFrame(true);
         onAspectRatioChange?.(id, w / h);
       }
     };
@@ -141,7 +150,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         track.removeEventListener('ended', checkTrackState);
       }
     };
-  }, [stream, label, id, onAspectRatioChange]);
+  }, [stream, label, id, isLocal, onAspectRatioChange]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -169,6 +178,9 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   };
 
   const getResolutionTag = () => {
+    if (!isLocal && !resolution) {
+      return 'Chờ khung hình';
+    }
     if (qualityMode === 'low') {
       return resolution && resolution.height > 0 && resolution.height <= 540
         ? `${resolution.height}p`
@@ -182,12 +194,14 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     return resolution && resolution.width >= 1920 ? '1080p' : 'HD';
   };
 
+  const showVideo = isVideoActive && hasFrame;
+
   return (
     <div
       ref={containerRef}
       style={style}
       className={`group relative overflow-hidden rounded-2xl border select-none flex items-center justify-center shadow-tile transition-[border-color,box-shadow] duration-150 ${
-        isVideoActive ? 'bg-surface-video' : 'bg-surface-muted'
+        showVideo ? 'bg-surface-video' : 'bg-surface-muted'
       } ${
         isSpeaking
           ? 'border-accent ring-2 ring-accent ring-offset-2 ring-offset-canvas'
@@ -204,16 +218,18 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         className={`w-full h-full ${
           fitMode === 'cover' ? 'object-cover' : 'object-contain'
         } transition-opacity duration-150 ${
-          isVideoActive ? 'opacity-100' : 'opacity-0'
+          showVideo ? 'opacity-100' : 'opacity-0'
         } ${isLocal && type === 'physical' ? '-scale-x-100' : ''}`}
       />
 
-      {!isVideoActive && (
+      {!showVideo && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface-subtle z-0 px-4 text-center">
           <div className="w-11 h-11 rounded-xl bg-surface border border-line-subtle flex items-center justify-center mb-2.5 text-ink-secondary shadow-sm">
             <VideoOff className="w-5 h-5" strokeWidth={1.75} />
           </div>
-          <span className="text-xs font-medium text-ink-secondary">Tín hiệu camera tạm dừng</span>
+          <span className="text-xs font-medium text-ink-secondary">
+            {isVideoActive ? 'Đang chờ nhận hình ảnh P2P...' : 'Tín hiệu camera tạm dừng'}
+          </span>
         </div>
       )}
 

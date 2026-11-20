@@ -774,7 +774,7 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
    */
   useEffect(() => {
     const socketInstance: Socket = io('/', {
-      transports: ['websocket', 'polling']
+      transports: ['polling', 'websocket']
     });
 
     socketRef.current = socketInstance;
@@ -1329,6 +1329,10 @@ export function useWebRTC(roomId: string, userName: string, initialAudio: boolea
 
     // Khi đối phương rời phòng họp
     socketInstance.on('peer-left', ({ peerId, peerName }: { peerId: string; peerName: string }) => {
+      if (peerInfoRef.current && peerId && peerInfoRef.current.peerId !== peerId) {
+        console.log(`[Socket] Bỏ qua peer-left cũ (${peerId}) vì đang kết nối với ${peerInfoRef.current.peerId}`);
+        return;
+      }
       console.log(`[Socket] Đối phương đã rời phòng: ${peerName} (${peerId})`);
       pcSessionIdRef.current++;
       if (pcRef.current) {

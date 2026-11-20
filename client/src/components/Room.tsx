@@ -43,6 +43,7 @@ export const Room: React.FC<RoomProps> = ({
 }) => {
   const {
     socket,
+    isConnected,
     isRoomFull,
     peerInfo,
     isPolite,
@@ -85,6 +86,7 @@ export const Room: React.FC<RoomProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [isIceStalled, setIsIceStalled] = useState(false);
 
   const prevMessagesLength = useRef(chatMessages.length);
   useEffect(() => {
@@ -109,6 +111,21 @@ export const Room: React.FC<RoomProps> = ({
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!peerInfo || iceConnectionState === 'connected' || iceConnectionState === 'completed') {
+      setIsIceStalled(false);
+      return;
+    }
+    if (iceConnectionState === 'failed') {
+      setIsIceStalled(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setIsIceStalled(true);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [peerInfo, iceConnectionState]);
 
   useEffect(() => {
     const setupInitialMedia = async () => {
@@ -306,14 +323,22 @@ export const Room: React.FC<RoomProps> = ({
         </div>
       </header>
 
-      {/* ICE Failure Banner */}
-      {isPeerConnected && iceConnectionState === 'failed' && (
-        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-center justify-center gap-2 shrink-0 z-10">
+      {/* Signaling Disconnect Banner */}
+      {!isConnected && (
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-xs flex items-center justify-center gap-2 shrink-0 z-10">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>Mất kết nối tới máy chủ Signaling. Đang thử kết nối lại...</span>
+        </div>
+      )}
+
+      {/* ICE Failure / Stalled Banner */}
+      {isPeerConnected && (iceConnectionState === 'failed' || isIceStalled) && (
+        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-center justify-center gap-2 shrink-0 z-10 text-center">
           <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
           <span>
             {hasTurnServer
-              ? 'Kết nối mạng P2P/TURN bị gián đoạn. Đang tự động thử kết nối lại...'
-              : 'Không thể thiết lập đường truyền video qua mạng khác nhau (4G hoặc Wifi cơ quan) do máy chủ chưa cấu hình TURN Server.'}
+              ? 'Kết nối mạng P2P/TURN đang bị gián đoạn. Đang tự động thử kết nối lại...'
+              : 'Chưa nối được luồng hình ảnh qua mạng khác nhau (4G hoặc Wifi khác) do server chưa cấu hình TURN Server.'}
           </span>
         </div>
       )}

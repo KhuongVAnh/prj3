@@ -203,7 +203,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           type="button"
           onClick={onOpenStats}
           title="Thông số kết nối WebRTC"
-          className={`${baseBtn} px-2.5 bg-surface-subtle border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-muted hidden md:flex`}
+          className={`${baseBtn} px-2.5 bg-surface-subtle border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-muted flex`}
         >
           <Activity className="w-4 h-4" strokeWidth={1.75} />
         </button>
