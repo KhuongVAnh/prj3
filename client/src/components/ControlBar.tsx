@@ -1,17 +1,16 @@
 /**
  * ============================================================================
- * MODULE: CLIENT COMPONENTS - CONTROL BAR (THANH ĐIỀU KHIỂN NỔI BÊN DƯỚI)
+ * MODULE: CLIENT COMPONENTS - CONTROL BAR (THANH ĐIỀU KHIỂN CUỘC GỌI)
  * ============================================================================
  * Thanh công cụ điều khiển cuộc gọi cố định ở cạnh dưới màn hình:
  *  - Bật/Tắt Micro (Mute / Unmute)
  *  - Bật/Tắt Camera chính
- *  - Mở Hub Quản lý Đa Camera (Multi-Camera Hub) kèm huy hiệu đếm số camera ON AIR
- *  - Phím tắt nhanh kích hoạt Camera ảo (Quick Virtual Cam)
+ *  - Mở Hub Quản lý Đa Camera kèm bộ đếm nguồn đang phát
  *  - Chia sẻ màn hình (Screen Share)
- *  - Bật/Tắt ngăn kéo Chat kèm chỉ số tin nhắn chưa đọc (Unread badge)
- *  - Bảng thống kê kỹ thuật WebRTC (Stats & Network Latency)
- *  - Chia sẻ liên kết phòng họp (Copy invite link)
- *  - Kết thúc / Rời cuộc gọi (Leave Call)
+ *  - Bật/Tắt Bảng trắng chung (Shared Whiteboard)
+ *  - Bật/Tắt ngăn kéo Chat kèm chỉ số tin nhắn chưa đọc
+ *  - Bảng thống kê kỹ thuật WebRTC
+ *  - Rời phòng (Leave Call)
  */
 
 import React from 'react';
@@ -25,7 +24,8 @@ import {
   Activity,
   PhoneOff,
   Share2,
-  PenTool
+  PenTool,
+  MonitorUp
 } from 'lucide-react';
 import { CameraSource } from '../types';
 
@@ -74,132 +74,161 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   const activeCameraCount = localCameras.length;
   const isWhiteboardLockedByOther = isWhiteboardOpen && !isWhiteboardOwner;
 
-  return (
-    <div className="flex items-center justify-center p-4 z-20">
-      <div className="flex items-center gap-2 sm:gap-3 px-4 py-2.5 rounded-full glass-pill border border-white/10 shadow-2xl">
-        {/* Mic Button */}
-        <div className="relative">
-          <button
-            onClick={onToggleMute}
-            title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-            className={`relative p-3.5 rounded-full transition-all duration-200 ${
-              isMuted
-                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
-                : 'bg-white/10 text-slate-100 hover:bg-white/20'
-            } ${isSpeaking && !isMuted ? 'ring-2 ring-brand-500' : ''}`}
-          >
-            {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
-        </div>
+  const baseBtn =
+    'relative h-10 rounded-xl border text-xs font-medium transition-colors duration-150 flex items-center justify-center gap-2 active:translate-y-[1px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
-        {/* Quick Camera Toggle */}
+  return (
+    <footer className="w-full px-3 sm:px-5 pb-3 pt-1 shrink-0 z-20 flex justify-center bg-canvas">
+      <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-2 rounded-2xl bg-surface border border-line-subtle shadow-dock max-w-full overflow-x-auto">
+        {/* Mic */}
         <button
-          onClick={onTogglePrimaryCamera}
-          title={hasActiveCamera ? 'Turn off primary camera' : 'Turn on primary camera'}
-          className={`p-3.5 rounded-full transition-all duration-200 ${
-            !hasActiveCamera
-              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
-              : 'bg-white/10 text-slate-100 hover:bg-white/20'
-          }`}
+          type="button"
+          onClick={onToggleMute}
+          title={isMuted ? 'Bật micro' : 'Tắt micro'}
+          className={`${baseBtn} px-3 ${
+            isMuted
+              ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+              : 'bg-surface-subtle border-line-subtle text-ink-primary hover:bg-surface-muted'
+          } ${isSpeaking && !isMuted ? 'ring-2 ring-accent/40 border-accent' : ''}`}
         >
-          {hasActiveCamera ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+          {isMuted ? (
+            <MicOff className="w-4 h-4 text-red-600" strokeWidth={1.75} />
+          ) : (
+            <Mic className="w-4 h-4 text-ink-secondary" strokeWidth={1.75} />
+          )}
+          <span className="hidden md:inline">{isMuted ? 'Đang tắt mic' : 'Micro'}</span>
         </button>
 
-        <div className="w-[1px] h-6 bg-white/10 mx-0.5" />
-
-        {/* Multi-Camera Hub Button with Counter Badge */}
+        {/* Primary Camera */}
         <button
-          onClick={onOpenCamManager}
-          title="Multi-Camera Hub (Add & Manage multiple cameras)"
-          className="relative flex items-center gap-2 px-4 py-3 rounded-full bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold transition-all shadow-lg shadow-brand-500/20 group"
+          type="button"
+          onClick={onTogglePrimaryCamera}
+          title={hasActiveCamera ? 'Tắt camera chính' : 'Bật camera chính'}
+          className={`${baseBtn} px-3 ${
+            !hasActiveCamera
+              ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+              : 'bg-surface-subtle border-line-subtle text-ink-primary hover:bg-surface-muted'
+          }`}
         >
-          <Layers className="w-5 h-5" />
-          <span className="text-xs hidden sm:inline">Multi-Cam</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-slate-950/30 text-[10px] font-mono">
+          {hasActiveCamera ? (
+            <Video className="w-4 h-4 text-ink-secondary" strokeWidth={1.75} />
+          ) : (
+            <VideoOff className="w-4 h-4 text-red-600" strokeWidth={1.75} />
+          )}
+          <span className="hidden md:inline">Camera</span>
+        </button>
+
+        {/* Multi-Camera Hub */}
+        <button
+          type="button"
+          onClick={onOpenCamManager}
+          title="Quản lý nhiều camera và nguồn phát"
+          className={`${baseBtn} px-3 bg-surface-subtle border-line-subtle text-ink-primary hover:bg-surface-muted`}
+        >
+          <Layers className="w-4 h-4 text-accent" strokeWidth={1.75} />
+          <span className="hidden sm:inline">Đa camera</span>
+          <span className="px-1.5 py-0.5 rounded-md bg-surface border border-line-subtle font-mono text-[11px] tabular-nums text-ink-secondary">
             {activeCameraCount}
           </span>
         </button>
 
+        <div className="w-px h-5 bg-line-subtle mx-0.5 shrink-0" />
+
         {/* Screen Share */}
         <button
+          type="button"
           onClick={onToggleScreenShare}
-          title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen as Feed'}
-          className={`p-3.5 rounded-full transition-all duration-200 hidden sm:flex items-center justify-center ${
+          title={isScreenSharing ? 'Dừng chia sẻ màn hình' : 'Chia sẻ màn hình'}
+          className={`${baseBtn} px-3 hidden sm:flex ${
             isScreenSharing
-              ? 'bg-sky-500 text-slate-950 font-bold'
-              : 'bg-white/10 text-slate-100 hover:bg-white/20'
+              ? 'bg-accent border-accent text-white hover:bg-accent-hover'
+              : 'bg-surface-subtle border-line-subtle text-ink-primary hover:bg-surface-muted'
           }`}
         >
-          <Share2 className="w-5 h-5" />
+          <MonitorUp className="w-4 h-4" strokeWidth={1.75} />
+          <span className="hidden lg:inline">{isScreenSharing ? 'Đang chia sẻ' : 'Màn hình'}</span>
         </button>
 
-        {/* Shared Whiteboard (chỉ 1 trong 2 người được bật) */}
+        {/* Shared Whiteboard */}
         <button
+          type="button"
           onClick={onToggleWhiteboard}
           disabled={isWhiteboardLockedByOther}
           title={
             isWhiteboardLockedByOther
-              ? `Bảng trắng đang được bật bởi ${whiteboardOwnerName || 'đối phương'}`
+              ? `Bảng trắng đang được mở bởi ${whiteboardOwnerName || 'đối phương'}`
               : isWhiteboardOpen
-              ? 'Tắt Bảng trắng'
-              : 'Mở Bảng trắng chung'
+              ? 'Đóng bảng trắng'
+              : 'Mở bảng trắng chung'
           }
-          className={`relative p-3.5 rounded-full transition-all duration-200 flex items-center justify-center ${
+          className={`${baseBtn} px-3 ${
             isWhiteboardLockedByOther
-              ? 'bg-white/5 text-slate-500 border border-white/10 cursor-not-allowed'
+              ? 'bg-surface-subtle border-line-subtle text-ink-muted cursor-not-allowed opacity-60'
               : isWhiteboardOpen && isWhiteboardOwner
-              ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/25'
-              : 'bg-white/10 text-slate-100 hover:bg-white/20'
+              ? 'bg-accent border-accent text-white hover:bg-accent-hover'
+              : 'bg-surface-subtle border-line-subtle text-ink-primary hover:bg-surface-muted'
           }`}
         >
-          <PenTool className="w-5 h-5" />
-          {isWhiteboardOpen && (
-            <span
-              className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
-                isWhiteboardOwner ? 'bg-slate-950' : 'bg-amber-400 animate-pulse'
-              }`}
-            />
+          <PenTool className="w-4 h-4" strokeWidth={1.75} />
+          <span className="hidden lg:inline">Bảng trắng</span>
+          {isWhiteboardLockedByOther && (
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
           )}
         </button>
 
-        {/* Chat Drawer Toggle */}
+        {/* Chat Drawer */}
         <button
+          type="button"
           onClick={onToggleChat}
-          title="In-call Chat"
-          className={`relative p-3.5 rounded-full transition-all duration-200 ${
+          title="Tin nhắn trong phòng"
+          className={`${baseBtn} px-3 ${
             isChatOpen
-              ? 'bg-white/20 text-brand-400'
-              : 'bg-white/10 text-slate-100 hover:bg-white/20'
+              ? 'bg-accent border-accent text-white hover:bg-accent-hover'
+              : 'bg-surface-subtle border-line-subtle text-ink-primary hover:bg-surface-muted'
           }`}
         >
-          <MessageSquare className="w-5 h-5" />
+          <MessageSquare className="w-4 h-4" strokeWidth={1.75} />
+          <span className="hidden lg:inline">Tin nhắn</span>
           {unreadCount > 0 && !isChatOpen && (
-            <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center animate-bounce">
+            <span className="px-1.5 py-0.5 rounded-md bg-accent text-[10px] font-mono font-semibold text-white leading-none">
               {unreadCount}
             </span>
           )}
         </button>
 
-        {/* WebRTC Stats */}
+        <div className="w-px h-5 bg-line-subtle mx-0.5 shrink-0" />
+
+        {/* Diagnostics / Stats */}
         <button
+          type="button"
           onClick={onOpenStats}
-          title="WebRTC Connection Stats"
-          className="p-3.5 rounded-full bg-white/10 text-slate-100 hover:bg-white/20 transition-all hidden lg:flex items-center justify-center"
+          title="Thông số kết nối WebRTC"
+          className={`${baseBtn} px-2.5 bg-surface-subtle border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-muted hidden md:flex`}
         >
-          <Activity className="w-5 h-5" />
+          <Activity className="w-4 h-4" strokeWidth={1.75} />
         </button>
 
-        <div className="w-[1px] h-6 bg-white/10 mx-0.5" />
-
-        {/* End Call Button */}
+        {/* Copy invite link on small screens */}
         <button
-          onClick={onLeaveCall}
-          title="Leave Call"
-          className="p-3.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 transition-all"
+          type="button"
+          onClick={onShareRoom}
+          title="Sao chép link mời"
+          className={`${baseBtn} px-2.5 bg-surface-subtle border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-muted sm:hidden`}
         >
-          <PhoneOff className="w-5 h-5" />
+          <Share2 className="w-4 h-4" strokeWidth={1.75} />
+        </button>
+
+        {/* Leave Call */}
+        <button
+          type="button"
+          onClick={onLeaveCall}
+          title="Rời phòng"
+          className={`${baseBtn} px-3.5 bg-red-600 hover:bg-red-700 border-red-600 text-white`}
+        >
+          <PhoneOff className="w-4 h-4" strokeWidth={1.75} />
+          <span className="hidden sm:inline">Rời phòng</span>
         </button>
       </div>
-    </div>
+    </footer>
   );
 };

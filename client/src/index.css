@@ -3,16 +3,18 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
-  background-color: #07080a;
+  min-height: 100dvh;
+  background-color: #f4f5f7;
+  color: #111318;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-/* Custom smooth scrollbars */
+/* Custom light scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -23,30 +25,20 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 9999px;
+  background: #d0d5dd;
+  border-radius: 6px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: #b0b7c3;
 }
 
-/* Glassmorphism utility */
-.glass-panel {
-  background: rgba(17, 20, 26, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.glass-pill {
-  background: rgba(12, 14, 18, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
-}
-
-.glow-emerald {
-  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.35);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

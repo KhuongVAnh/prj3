@@ -28,7 +28,6 @@ export function App() {
   const [initialRoomId, setInitialRoomId] = useState<string>(() => getRoomFromUrl());
   const [currentConfig, setCurrentConfig] = useState<JoinConfig | null>(null);
 
-  // Đồng bộ nếu người dùng bấm Back/Forward trên trình duyệt
   useEffect(() => {
     const handlePopState = () => {
       const roomFromUrl = getRoomFromUrl();
@@ -47,7 +46,6 @@ export function App() {
     initialAudio: boolean,
     initialVideo: boolean
   ) => {
-    // Update URL query without full page refresh
     const url = new URL(window.location.href);
     url.searchParams.set('room', roomId);
     window.history.pushState({}, '', url.toString());
@@ -62,12 +60,11 @@ export function App() {
   };
 
   const handleLeaveRoom = () => {
-    // Keep or clear room param
     setCurrentConfig(null);
   };
 
   return (
-    <div className="min-h-screen bg-dark-950 text-slate-100 font-sans selection:bg-brand-500/20 selection:text-brand-400">
+    <div className="min-h-[100dvh] bg-canvas text-ink-primary font-sans selection:bg-accent/15 selection:text-accent">
       {currentConfig ? (
         <Room
           roomId={currentConfig.roomId}

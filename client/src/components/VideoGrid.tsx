@@ -3,25 +3,9 @@
  * MODULE: CLIENT COMPONENTS - VIDEO GRID (LƯỚI HIỂN THỊ ĐA LUỒNG VIDEO)
  * ============================================================================
  * Component điều phối bố cục hiển thị video giữa 2 người và nhiều camera:
- *  1. HỢP NHẤT TẤT CẢ CÁC LUỒNG:
- *     - Tập hợp cả luồng camera cục bộ (Local) và luồng nhận từ xa (Remote)
- *       vào một danh sách đồng nhất để render.
- *  2. BỐ CỤC LƯỚI TỰ THÍCH ỨNG (ADAPTIVE VIEWPORT-FITTING GRID):
- *     - 1 video: Toàn màn hình trung tâm, đạt kích thước lớn nhất trong viewport
- *       nhưng luôn bảo toàn đúng tỉ lệ khung hình thực tế (16:9, 4:3, v.v.).
- *     - 2 video: Chia đôi ngang (side-by-side) trên desktop hoặc dọc (stacked)
- *       trên màn hình dọc để đạt kích thước lớn nhất, không sinh thanh cuộn.
- *     - 3-4 video: Lưới cân bằng 2x2 khớp 100% không gian màn hình, không sinh thanh cuộn.
- *       (3 video thì video thứ 3 căn giữa cân xứng, cùng kích thước với 2 video trên).
- *     - 5-6 video: Lưới 3x2 (hoặc 2x3 trên màn hình dọc) vừa vặn khung nhìn.
- *     - 7+ video: Lưới responsive cuộn mượt mà.
- *  3. CHẾ ĐỘ TIÊU ĐIỂM (SPOTLIGHT / PIN MODE):
- *     - Luồng được ghim chiếm trọn khung hình chính bảo toàn tỉ lệ thực tế.
- *     - Các luồng phụ xếp thành dải thumbnail sắc nét ở cạnh phải (desktop)
- *       hoặc cạnh dưới (mobile). Nhấp vào bất kỳ thumbnail nào để chuyển tiêu điểm.
- *  4. KIẾN TRÚC MỘT WRAPPER DUY NHẤT:
- *     - containerRef luôn duy trì trên 1 phần tử DOM duy nhất, đảm bảo ResizeObserver
- *       hoạt động chuẩn xác 100% trong suốt vòng đời của component.
+ *  - Tự động tính toán kích thước vừa khít viewport theo tỉ lệ thực tế của từng luồng.
+ *  - Hỗ trợ chế độ tiêu điểm (Spotlight / Pin) và dải thumbnail phụ.
+ *  - Duy trì 1 wrapper DOM cố định để ResizeObserver hoạt động ổn định.
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -37,7 +21,7 @@ import {
 } from '../types';
 import { VideoTile } from './VideoTile';
 import { WhiteboardTile } from './WhiteboardTile';
-import { Video, UserPlus, Sparkles } from 'lucide-react';
+import { Video, SlidersHorizontal } from 'lucide-react';
 
 export interface VideoGridProps {
   localCameras: CameraSource[];
@@ -54,7 +38,6 @@ export interface VideoGridProps {
   roomId?: string;
   onOpenCamManager?: () => void;
   onShareRoom?: () => void;
-  // Whiteboard props (hiển thị như ô thứ 5 ngang hàng với các camera)
   whiteboardState?: WhiteboardState;
   isWhiteboardOwner?: boolean;
   onCloseWhiteboard?: () => void;
@@ -89,9 +72,6 @@ type GridItem =
       id: 'whiteboard';
     };
 
-/**
- * Tính toán kích thước tối đa vừa vặn vùng chứa theo tỉ lệ ratio cho trước (mặc định 16:9)
- */
 export function fitBox(availW: number, availH: number, ratio: number = 16 / 9): { width: number; height: number } {
   const safeW = Math.max(10, availW);
   const safeH = Math.max(10, availH);
@@ -106,9 +86,6 @@ export function fitBox(availW: number, availH: number, ratio: number = 16 / 9): 
   return { width: Math.floor(w), height: Math.floor(h) };
 }
 
-/**
- * Lấy tỉ lệ khung hình từ MediaStreamTrack nếu đã có sẵn
- */
 function getTrackAspectRatio(stream?: MediaStream | null): number | null {
   if (!stream) return null;
   const track = stream.getVideoTracks()[0];
@@ -130,7 +107,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   onTogglePin,
   onRemoveLocalCamera,
   peerConnected,
-  peerName = 'Peer',
+  peerName = 'Đối phương',
   roomId,
   onOpenCamManager,
   onShareRoom,
@@ -148,7 +125,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [streamRatios, setStreamRatios] = useState<Record<string, number>>({});
 
-  // Xác định chế độ chất lượng ('high' 1080p khi ghim | 'grid' 720p mặc định | 'low' 360p thu nhỏ)
   const getQuality = useCallback((id: string, isPinnedTile: boolean, isThumbTile: boolean): VideoQualityMode => {
     if (isPinnedTile) return 'high';
     if (isThumbTile) return 'low';
@@ -157,7 +133,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     return 'grid';
   }, [pinnedId, localQualityModes]);
 
-  // Theo dõi chính xác kích thước vùng chứa VideoGrid để tự co giãn tối ưu
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -175,7 +150,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  // Nhận báo cáo tỉ lệ thực tế từ VideoTile khi video tải metadata
   const handleAspectRatioChange = useCallback((id: string, ratio: number) => {
     if (!ratio || !isFinite(ratio) || ratio <= 0) return;
     setStreamRatios(prev => {
@@ -184,7 +158,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     });
   }, []);
 
-  // Hợp nhất danh sách tất cả các luồng camera + Bảng trắng (nếu đang mở)
   const allStreams = useMemo<GridItem[]>(() => {
     const items: GridItem[] = [
       ...localCameras.map(cam => ({
@@ -226,7 +199,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     whiteboardState?.isOpen
   ]);
 
-  // Hàm xác định tỉ lệ khung hình cho một item (Bảng trắng luôn chuẩn 16:9)
   const getItemRatio = useCallback(
     (item: GridItem): number => {
       if (item.kind === 'whiteboard') return 16 / 9;
@@ -238,7 +210,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     [streamRatios]
   );
 
-  // Kiểm tra luồng đang được ghim tiêu điểm
   const pinnedStream = pinnedId ? allStreams.find(s => s.id === pinnedId) : null;
   const secondaryStreams = pinnedStream ? allStreams.filter(s => s.id !== pinnedId) : [];
 
@@ -299,42 +270,36 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   };
 
   const { width: availW, height: availH } = dimensions;
-  const gap = 16;
+  const gap = 14;
   const count = allStreams.length;
   const isLandscape = availW >= availH;
   const hasDimensions = availW > 0 && availH > 0;
 
-  // ==========================================================================
-  // RENDER NỘI DUNG LƯỚI BÊN TRONG WRAPPER DUY NHẤT
-  // ==========================================================================
   const renderContent = () => {
-    // ------------------------------------------------------------------------
-    // [TRƯỜNG HỢP 0]: Không có luồng nào đang bật
-    // ------------------------------------------------------------------------
     if (count === 0) {
       return (
         <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center p-6 text-center select-none animate-fade-in">
-          <div className="w-20 h-20 rounded-3xl bg-dark-900 border border-white/10 flex items-center justify-center mb-5 text-slate-400 shadow-2xl">
-            <Video className="w-10 h-10 text-brand-500 animate-pulse" />
+          <div className="w-14 h-14 rounded-2xl bg-surface border border-line-subtle shadow-card flex items-center justify-center mb-4 text-ink-secondary">
+            <Video className="w-6 h-6" strokeWidth={1.75} />
           </div>
-          <h3 className="text-xl font-bold text-slate-100 mb-2">Chưa có luồng camera nào</h3>
-          <p className="text-slate-400 text-sm max-w-md mb-6">
-            Bật webcam vật lý của bạn hoặc kích hoạt camera mô phỏng từ thanh công cụ bên dưới để bắt đầu phát sóng.
+          <h3 className="text-base font-semibold text-ink-primary mb-1.5">Chưa có nguồn video nào</h3>
+          <p className="text-ink-secondary text-sm max-w-sm mb-5">
+            Bật webcam hoặc chia sẻ màn hình từ thanh công cụ bên dưới để bắt đầu phát.
           </p>
           {onOpenCamManager && (
             <button
+              type="button"
               onClick={onOpenCamManager}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-semibold text-sm transition-all shadow-lg shadow-brand-500/25"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium text-xs transition-colors shadow-sm"
             >
-              <Sparkles className="w-4 h-4" />
-              <span>Mở Hub Quản lý Camera</span>
+              <SlidersHorizontal className="w-4 h-4" strokeWidth={1.75} />
+              <span>Chọn nguồn video</span>
             </button>
           )}
         </div>
       );
     }
 
-    // Helper render 1 ô vào wrapper cố định kích thước
     const renderSizedSlot = (item: GridItem, target: { width: number; height: number }, fallbackAspect = '16/9') => (
       <div
         key={item.id}
@@ -349,9 +314,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       </div>
     );
 
-    // ------------------------------------------------------------------------
-    // [CHẾ ĐỘ TIÊU ĐIỂM (SPOTLIGHT / PIN MODE)]: Ghim 1 camera hoặc Bảng trắng
-    // ------------------------------------------------------------------------
     if (pinnedStream) {
       const pinnedRatio = getItemRatio(pinnedStream);
 
@@ -375,7 +337,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
         const mainSize = fitBox(availW - sidebarW - gap, availH, pinnedRatio);
 
         return (
-          <div className="flex-1 w-full h-full min-h-0 flex flex-row items-center justify-center gap-4 overflow-hidden">
+          <div className="flex-1 w-full h-full min-h-0 flex flex-row items-center justify-center gap-3.5 overflow-hidden">
             <div className="flex-1 h-full min-h-0 flex items-center justify-center">
               {renderTile(pinnedStream, {
                 isPinned: true,
@@ -388,14 +350,14 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
 
             <div
               style={{ width: `${sidebarW}px` }}
-              className="h-full shrink-0 flex flex-col gap-3 overflow-y-auto pr-1 py-1"
+              className="h-full shrink-0 flex flex-col gap-2.5 overflow-y-auto pr-1 py-1"
             >
               {secondaryStreams.map(item => (
                 <div
                   key={item.id}
                   onClick={() => onTogglePin(item.id)}
-                  title="Nhấp để chuyển tiêu điểm sang khung này"
-                  className="w-full aspect-video shrink-0 rounded-2xl overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-brand-500/60 shadow-md"
+                  title="Nhấp để đưa lên khung chính"
+                  className="w-full aspect-video shrink-0 rounded-2xl overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-accent"
                 >
                   {renderTile(item, { isPinned: false, isThumbnail: true, className: 'w-full h-full' })}
                 </div>
@@ -427,8 +389,8 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 <div
                   key={item.id}
                   onClick={() => onTogglePin(item.id)}
-                  title="Nhấp để chuyển tiêu điểm"
-                  className="h-full aspect-video shrink-0 rounded-xl overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-brand-500/60 shadow-md"
+                  title="Nhấp để đưa lên khung chính"
+                  className="h-full aspect-video shrink-0 rounded-2xl overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-accent"
                 >
                   {renderTile(item, { isPinned: false, isThumbnail: true, className: 'w-full h-full' })}
                 </div>
@@ -439,9 +401,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       }
     }
 
-    // ------------------------------------------------------------------------
-    // [1 Ô]: Căn giữa tuyệt đối, tối đa hóa trong viewport
-    // ------------------------------------------------------------------------
     if (count === 1) {
       const single = allStreams[0];
       const singleRatio = getItemRatio(single);
@@ -460,9 +419,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       );
     }
 
-    // ------------------------------------------------------------------------
-    // [2 Ô]: Side-by-side (2 cột) trên landscape hoặc Stacked (2 hàng) trên portrait
-    // ------------------------------------------------------------------------
     if (count === 2) {
       const useSideBySide = isLandscape;
       const target = useSideBySide
@@ -471,7 +427,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
 
       return (
         <div
-          className={`flex-1 w-full h-full min-h-0 flex items-center justify-center gap-3 sm:gap-4 overflow-hidden ${
+          className={`flex-1 w-full h-full min-h-0 flex items-center justify-center gap-3 sm:gap-3.5 overflow-hidden ${
             useSideBySide ? 'flex-row' : 'flex-col'
           }`}
         >
@@ -480,9 +436,6 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       );
     }
 
-    // ------------------------------------------------------------------------
-    // [3-4 Ô]: Lưới cân bằng 2x2 vừa khít trong viewport
-    // ------------------------------------------------------------------------
     if (count === 3 || count === 4) {
       const isMobilePortrait = !isLandscape && count === 3;
       const stack3Target = isMobilePortrait ? fitBox(availW, (availH - gap * 2) / 3, 16 / 9) : null;
@@ -504,20 +457,17 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       const row2 = allStreams.slice(2, count);
 
       return (
-        <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 overflow-hidden">
-          <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
+        <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-3.5 overflow-hidden">
+          <div className="flex flex-row items-center justify-center gap-3 sm:gap-3.5 w-full">
             {row1.map(item => renderSizedSlot(item, grid2x2Target))}
           </div>
-          <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
+          <div className="flex flex-row items-center justify-center gap-3 sm:gap-3.5 w-full">
             {row2.map(item => renderSizedSlot(item, grid2x2Target))}
           </div>
         </div>
       );
     }
 
-    // ------------------------------------------------------------------------
-    // [5-6 Ô] (vd: 4 Camera + 1 Bảng trắng): Lưới 3x2 (hoặc 2x3 trên màn dọc)
-    // ------------------------------------------------------------------------
     if (count === 5 || count === 6) {
       if (isLandscape) {
         const target = fitBox((availW - gap * 2) / 3, (availH - gap) / 2, 16 / 9);
@@ -525,11 +475,11 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
         const row2 = allStreams.slice(3, count);
 
         return (
-          <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 overflow-hidden">
-            <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
+          <div className="flex-1 w-full h-full min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-3.5 overflow-hidden">
+            <div className="flex flex-row items-center justify-center gap-3 sm:gap-3.5 w-full">
               {row1.map(item => renderSizedSlot(item, target))}
             </div>
-            <div className="flex flex-row items-center justify-center gap-3 sm:gap-4 w-full">
+            <div className="flex flex-row items-center justify-center gap-3 sm:gap-3.5 w-full">
               {row2.map(item => renderSizedSlot(item, target))}
             </div>
           </div>
@@ -552,14 +502,11 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
       }
     }
 
-    // ------------------------------------------------------------------------
-    // [7+ Ô]: Lưới nhiều khung cuộn mượt mà
-    // ------------------------------------------------------------------------
     return (
       <div className="flex-1 w-full h-full min-h-0 overflow-y-auto flex items-center justify-center py-2">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 w-full max-w-7xl mx-auto py-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5 w-full max-w-7xl mx-auto py-2">
           {allStreams.map(item => (
-            <div key={item.id} className="w-full aspect-video rounded-2xl overflow-hidden shadow-md">
+            <div key={item.id} className="w-full aspect-video rounded-2xl overflow-hidden">
               {renderTile(item, { isPinned: false, isThumbnail: false, className: 'w-full h-full' })}
             </div>
           ))}
@@ -568,31 +515,27 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     );
   };
 
-  // ==========================================================================
-  // KHUNG BAO NGOÀI DUY NHẤT (PERSISTENT WRAPPER CONTAINER)
-  // Giữ vững containerRef không bao giờ bị unmount khi số lượng camera thay đổi
-  // ==========================================================================
   return (
     <div
       ref={containerRef}
-      className="flex-1 w-full h-full min-h-0 relative overflow-hidden flex flex-col items-center justify-center p-3 sm:p-5 select-none bg-dark-950"
+      className="flex-1 w-full h-full min-h-0 relative overflow-hidden flex flex-col items-center justify-center p-3 sm:p-4 select-none bg-canvas"
     >
       {renderContent()}
 
-      {/* Thông báo thanh lịch khi đối phương chưa vào phòng (hiển thị khi có luồng phát) */}
       {!peerConnected && count > 0 && (
-        <div className="absolute top-4 sm:top-5 z-20 flex items-center gap-2.5 px-4 py-2 rounded-full glass-pill border border-brand-500/30 text-xs text-slate-200 shadow-2xl animate-fade-in pointer-events-auto">
-          <UserPlus className="w-4 h-4 text-brand-400 animate-pulse" />
-          <span className="font-medium">Đang chờ đối phương tham gia...</span>
+        <div className="absolute top-3.5 sm:top-4 z-20 flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-surface border border-line-subtle shadow-dock text-xs text-ink-secondary pointer-events-auto">
+          <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+          <span>Đang chờ đối phương vào phòng</span>
           {roomId && (
-            <span className="text-[11px] font-mono font-bold text-slate-300 px-2 py-0.5 rounded bg-white/5">
+            <span className="font-mono font-medium text-ink-primary hidden sm:inline">
               {roomId}
             </span>
           )}
           {onShareRoom && (
             <button
+              type="button"
               onClick={onShareRoom}
-              className="px-2.5 py-1 rounded-full bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold text-[11px] transition-all ml-1 shadow-md shadow-brand-500/20"
+              className="text-accent hover:text-accent-hover font-medium transition-colors pl-2 border-l border-line-subtle"
             >
               Sao chép link mời
             </button>

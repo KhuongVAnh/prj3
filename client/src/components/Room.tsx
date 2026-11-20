@@ -4,7 +4,7 @@
  * ============================================================================
  * Màn hình phòng gọi video 1-1 trực tiếp:
  *  - Tích hợp hook useWebRTC để đàm phán P2P và truyền phát đa camera.
- *  - Thanh điều khiển trên cùng (Meeting Header): mã phòng, đồng hồ đếm giờ, số lượng luồng video, sao chép link.
+ *  - Thanh điều khiển trên cùng: mã phòng, sao chép link, trạng thái đối phương, đồng hồ.
  *  - Khu vực chính: Lưới video thích ứng (VideoGrid) tự sắp xếp luồng local và remote.
  *  - Thanh điều khiển dưới (ControlBar) và các Modal (CameraManagerModal, ChatDrawer, StatsModal).
  */
@@ -21,10 +21,9 @@ import {
   Copy,
   Check,
   Users,
-  ShieldCheck,
   AlertTriangle,
-  Sparkles,
-  Radio
+  Video,
+  SlidersHorizontal
 } from 'lucide-react';
 
 interface RoomProps {
@@ -44,7 +43,6 @@ export const Room: React.FC<RoomProps> = ({
 }) => {
   const {
     socket,
-    isConnected,
     isRoomFull,
     peerInfo,
     isPolite,
@@ -77,11 +75,9 @@ export const Room: React.FC<RoomProps> = ({
     registerWhiteboardLiveHandler
   } = useWebRTC(roomId, userName, initialAudio);
 
-  // Audio level monitoring for local and remote users
   const { isSpeaking: isLocalSpeaking } = useAudioLevel(localAudioStream, !isMuted);
   const { isSpeaking: isRemoteSpeaking } = useAudioLevel(remoteAudioStream, !peerInfo?.isMuted);
 
-  // UI state
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [isCamManagerOpen, setIsCamManagerOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -90,7 +86,6 @@ export const Room: React.FC<RoomProps> = ({
   const [callDuration, setCallDuration] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
-  // Keep track of unread messages when chat drawer is closed
   const prevMessagesLength = useRef(chatMessages.length);
   useEffect(() => {
     if (!isChatOpen && chatMessages.length > prevMessagesLength.current) {
@@ -101,7 +96,6 @@ export const Room: React.FC<RoomProps> = ({
     prevMessagesLength.current = chatMessages.length;
   }, [chatMessages, isChatOpen]);
 
-  // Nếu bảng trắng đang được ghim mà bị tắt -> bỏ ghim để khôi phục 720p grid cho các camera
   useEffect(() => {
     if (pinnedId === 'whiteboard' && !whiteboardState.isOpen) {
       setPinnedId(null);
@@ -109,7 +103,6 @@ export const Room: React.FC<RoomProps> = ({
     }
   }, [pinnedId, whiteboardState.isOpen, sendPinStateUpdate]);
 
-  // Call duration counter
   useEffect(() => {
     const timer = setInterval(() => {
       setCallDuration(prev => prev + 1);
@@ -117,7 +110,6 @@ export const Room: React.FC<RoomProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Initialize media according to lobby choices
   useEffect(() => {
     const setupInitialMedia = async () => {
       const devices = await refreshDevices();
@@ -128,7 +120,6 @@ export const Room: React.FC<RoomProps> = ({
 
       if (initialVideo) {
         try {
-          // Explicitly pass the first detected camera device ID so it maps cleanly to hardware
           const firstDeviceId = devices && devices.length > 0 ? devices[0].deviceId : undefined;
           await addPhysicalCamera(firstDeviceId);
         } catch (err) {
@@ -159,16 +150,13 @@ export const Room: React.FC<RoomProps> = ({
     const nextPinnedId = pinnedId === id ? null : id;
     setPinnedId(nextPinnedId);
 
-    // Xác định ID camera để thông báo đối phương tự động điều chỉnh chất lượng phát
     if (!nextPinnedId) {
       sendPinStateUpdate(null);
     } else {
       const remoteCam = remoteCameras.find(rc => rc.id === nextPinnedId);
       if (remoteCam) {
-        // Nếu ghim camera của đối phương: gửi cameraId của đối phương để họ nâng chất lượng camera đó
         sendPinStateUpdate(remoteCam.cameraId);
       } else {
-        // Nếu ghim camera của chính máy mình: gửi id để đối phương biết hạ các camera của họ xuống
         sendPinStateUpdate(nextPinnedId);
       }
     }
@@ -215,23 +203,23 @@ export const Room: React.FC<RoomProps> = ({
     }
   };
 
-  // If room is full (more than 2 participants attempted to enter 1-1 room)
   if (isRoomFull) {
     return (
-      <div className="min-h-screen bg-dark-950 flex items-center justify-center p-6 text-center">
-        <div className="max-w-md w-full p-8 rounded-3xl bg-dark-900 border border-white/10 shadow-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="w-8 h-8" />
+      <div className="min-h-[100dvh] bg-canvas flex items-center justify-center p-6">
+        <div className="max-w-md w-full p-7 rounded-2xl bg-surface border border-line-subtle shadow-card">
+          <div className="w-10 h-10 rounded-xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center mb-4">
+            <AlertTriangle className="w-5 h-5" strokeWidth={1.75} />
           </div>
-          <h2 className="text-xl font-bold text-slate-100 mb-2">Room is Full</h2>
-          <p className="text-sm text-slate-400 mb-6">
-            This room already has 2 participants in a private 1-on-1 call. Please create a new room or use a different code.
+          <h2 className="text-lg font-semibold text-ink-primary mb-1.5">Phòng đã đủ người</h2>
+          <p className="text-sm text-ink-secondary mb-6 leading-relaxed">
+            Phòng họp 1-1 này hiện đã có 2 người tham gia. Vui lòng tạo mã phòng khác hoặc quay lại sảnh chờ.
           </p>
           <button
+            type="button"
             onClick={onLeaveRoom}
-            className="w-full py-3 rounded-2xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold text-sm transition-all shadow-lg shadow-brand-500/20"
+            className="w-full py-2.5 px-4 rounded-xl bg-accent hover:bg-accent-hover text-white font-medium text-sm transition-colors"
           >
-            Back to Lobby
+            Quay lại sảnh chờ
           </button>
         </div>
       </div>
@@ -242,82 +230,95 @@ export const Room: React.FC<RoomProps> = ({
   const isWhiteboardOwner = Boolean(
     whiteboardState.isOpen && whiteboardState.ownerId && socket?.id && whiteboardState.ownerId === socket.id
   );
-  const totalActiveStreams = localCameras.length + remoteCameras.length;
 
   return (
-    <div className="h-screen w-screen bg-dark-950 flex flex-col overflow-hidden select-none">
-      {/* Top Meeting Bar */}
-      <header className="h-16 px-4 sm:px-6 border-b border-white/10 bg-dark-900/80 backdrop-blur-md flex items-center justify-between shrink-0 z-20">
-        {/* Left: Room Info & Copy Link */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10">
-            <Radio className="w-3.5 h-3.5 text-brand-400 animate-pulse" />
-            <span className="text-xs font-mono font-bold text-slate-200 uppercase tracking-wide">
-              {roomId}
-            </span>
+    <div className="h-[100dvh] w-screen bg-canvas flex flex-col overflow-hidden select-none">
+      {/* Top Light Header */}
+      <header className="h-14 px-4 sm:px-5 border-b border-line-subtle bg-surface flex items-center justify-between shrink-0 z-20 gap-3">
+        {/* Left: Wordmark & Room ID */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center text-white">
+              <Video className="w-3.5 h-3.5" strokeWidth={2} />
+            </div>
+            <span className="text-sm font-semibold tracking-tight text-ink-primary">OmniCam</span>
+          </div>
+
+          <div className="hidden md:block w-px h-4 bg-line-subtle shrink-0" />
+
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-surface-subtle border border-line-subtle min-w-0">
+            <span className="text-xs font-mono font-medium text-ink-primary truncate">{roomId}</span>
             <button
+              type="button"
               onClick={handleCopyLink}
-              title="Copy Meeting Link"
-              className="p-1 rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/10 transition-colors ml-1"
+              title="Sao chép đường dẫn phòng"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-xs text-ink-secondary hover:text-ink-primary hover:bg-surface-muted transition-colors shrink-0"
             >
-              {copiedLink ? <Check className="w-3.5 h-3.5 text-brand-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedLink ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" strokeWidth={2} />
+                  <span className="hidden sm:inline text-emerald-700 font-medium">Đã chép</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  <span className="hidden sm:inline">Sao chép</span>
+                </>
+              )}
             </button>
           </div>
-
-          {copiedLink && (
-            <span className="text-xs text-brand-400 font-medium animate-fade-in hidden sm:inline">
-              Link copied!
-            </span>
-          )}
         </div>
 
-        {/* Center: Duration & Status */}
-        <div className="hidden sm:flex items-center gap-3 font-mono text-xs">
-          <div className="px-3 py-1 rounded-full bg-dark-850 border border-white/10 text-slate-300">
-            {formatDuration(callDuration)}
-          </div>
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-dark-850 border border-white/10">
+        {/* Center: Peer Status & Timer */}
+        <div className="hidden sm:flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-surface-subtle border border-line-subtle text-ink-secondary">
             <span
-              className={`w-2 h-2 rounded-full ${
-                isPeerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                isPeerConnected ? 'bg-emerald-600' : 'bg-amber-500'
               }`}
             />
-            <span className="text-slate-300">
-              {isPeerConnected ? `Connected with ${peerInfo?.peerName}` : 'Waiting for Peer'}
+            <span className="truncate max-w-[200px] font-medium text-ink-primary">
+              {isPeerConnected ? `Đang gọi với ${peerInfo?.peerName}` : 'Đang chờ đối phương'}
             </span>
           </div>
+
+          <span className="font-mono tabular-nums text-ink-secondary">
+            {formatDuration(callDuration)}
+          </span>
         </div>
 
-        {/* Right: Multi-Cam stats badge & Participants */}
-        <div className="flex items-center gap-2">
+        {/* Right: Sources & Participant Count */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={() => setIsCamManagerOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/25 text-brand-400 hover:bg-brand-500/20 text-xs font-semibold transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-surface-muted border border-line-subtle text-xs font-medium text-ink-primary transition-colors"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{localCameras.length} Local Feeds</span>
+            <SlidersHorizontal className="w-3.5 h-3.5 text-accent" strokeWidth={1.75} />
+            <span className="hidden xs:inline">Nguồn phát</span>
+            <span className="font-mono text-ink-secondary tabular-nums">({localCameras.length})</span>
           </button>
 
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10 text-xs text-slate-300 font-mono">
-            <Users className="w-3.5 h-3.5 text-slate-400" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-surface-subtle border border-line-subtle text-xs font-mono tabular-nums text-ink-secondary">
+            <Users className="w-3.5 h-3.5 text-ink-muted" strokeWidth={1.75} />
             <span>{isPeerConnected ? '2/2' : '1/2'}</span>
           </div>
         </div>
       </header>
 
-      {/* Cảnh báo khi ICE kết nối P2P thất bại qua mạng khác nhau (4G / Firewall) */}
+      {/* ICE Failure Banner */}
       {isPeerConnected && iceConnectionState === 'failed' && (
-        <div className="px-4 py-2 bg-rose-500/15 border-b border-rose-500/30 text-rose-200 text-xs flex items-center justify-center gap-2 shrink-0 z-10">
-          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-center justify-center gap-2 shrink-0 z-10">
+          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
           <span>
             {hasTurnServer
               ? 'Kết nối mạng P2P/TURN bị gián đoạn. Đang tự động thử kết nối lại...'
-              : 'Không thể thiết lập đường truyền video qua mạng khác nhau (4G / Wifi trường học, công ty) do máy chủ chưa cấu hình TURN Server.'}
+              : 'Không thể thiết lập đường truyền video qua mạng khác nhau (4G hoặc Wifi cơ quan) do máy chủ chưa cấu hình TURN Server.'}
           </span>
         </div>
       )}
 
-      {/* Main Workspace (Video Grid + Optional Chat Drawer) */}
+      {/* Main Workspace */}
       <div className="flex-1 flex min-h-0 relative overflow-hidden">
         <VideoGrid
           localCameras={localCameras}
@@ -345,7 +346,6 @@ export const Room: React.FC<RoomProps> = ({
           registerWhiteboardLiveHandler={registerWhiteboardLiveHandler}
         />
 
-        {/* In-Call Chat Drawer */}
         <ChatDrawer
           isOpen={isChatOpen}
           onClose={() => setIsChatOpen(false)}
@@ -355,7 +355,7 @@ export const Room: React.FC<RoomProps> = ({
         />
       </div>
 
-      {/* Floating Bottom Control Bar */}
+      {/* Control Dock */}
       <ControlBar
         isMuted={isMuted}
         onToggleMute={toggleMute}
@@ -377,7 +377,7 @@ export const Room: React.FC<RoomProps> = ({
         isSpeaking={isLocalSpeaking}
       />
 
-      {/* Multi-Camera Management Hub Modal */}
+      {/* Modals */}
       <CameraManagerModal
         isOpen={isCamManagerOpen}
         onClose={() => setIsCamManagerOpen(false)}
@@ -388,7 +388,6 @@ export const Room: React.FC<RoomProps> = ({
         onRefreshDevices={refreshDevices}
       />
 
-      {/* WebRTC Diagnostics & Stats Modal */}
       <StatsModal
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}

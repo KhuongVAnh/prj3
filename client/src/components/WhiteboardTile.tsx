@@ -5,8 +5,7 @@
  * Hiển thị như một khung tương tác ngang hàng với các luồng camera trong VideoGrid:
  *  - Hỗ trợ ghim tiêu điểm (Spotlight Pin) hoặc xem ở dạng lưới / thumbnail.
  *  - Chỉ 1 trong 2 người được bật/tắt bảng, nhưng CẢ 2 người đều vẽ song song được.
- *  - Chuẩn hóa tọa độ (0..1) trên không gian logic 16:9 (1920x1080) giúp nét vẽ
- *    khớp chính xác tuyệt đối bất kể kích thước màn hình hay chế độ phóng to/thu nhỏ.
+ *  - Chuẩn hóa tọa độ (0..1) trên không gian logic 16:9 (1920x1080).
  *  - Tẩy sử dụng lớp mực trong suốt (destination-out) để không xóa mất nền kẻ ô.
  */
 
@@ -35,8 +34,8 @@ const LOGICAL_WIDTH = 1920;
 const LOGICAL_HEIGHT = 1080;
 
 const PEN_COLORS = [
-  { name: 'Đen', value: '#0f172a' },
-  { name: 'Đỏ', value: '#ef4444' },
+  { name: 'Đen', value: '#111318' },
+  { name: 'Đỏ', value: '#dc2626' },
   { name: 'Xanh dương', value: '#2563eb' },
   { name: 'Xanh lá', value: '#16a34a' }
 ];
@@ -73,9 +72,6 @@ export interface WhiteboardTileProps {
   style?: React.CSSProperties;
 }
 
-/**
- * Vẽ một nét mượt mà bằng đường cong bậc 2 (Quadratic Bezier) lên Canvas 1920x1080
- */
 function renderStrokeOnContext(
   ctx: CanvasRenderingContext2D,
   tool: WhiteboardTool,
@@ -154,7 +150,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
   const [size, setSize] = useState<number>(STROKE_SIZES[1].value);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Tham chiếu phục vụ vẽ tức thời 60fps không gây re-render React
   const activeStrokeRef = useRef<{
     id: string;
     tool: WhiteboardTool;
@@ -167,9 +162,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
 
   const remoteLiveStrokesRef = useRef<Map<string, WhiteboardLiveDraw>>(new Map());
 
-  /**
-   * Vẽ lại toàn bộ các nét đã lưu + các nét đang vẽ dở
-   */
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -182,12 +174,10 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
       renderStrokeOnContext(ctx, s.tool, s.color, s.size, s.points);
     }
 
-    // Vẽ thêm các nét live từ đối phương chưa kịp commit
     remoteLiveStrokesRef.current.forEach(live => {
       renderStrokeOnContext(ctx, live.tool, live.color, live.size, live.points);
     });
 
-    // Vẽ nét hiện tại của chính máy mình (nếu đang giữ bút)
     if (activeStrokeRef.current) {
       const a = activeStrokeRef.current;
       renderStrokeOnContext(ctx, a.tool, a.color, a.size, a.points);
@@ -195,7 +185,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
   }, [strokes]);
 
   useEffect(() => {
-    // Khi danh sách strokes đã commit cập nhật, dọn các nét live đã commit xong
     const committedIds = new Set(strokes.map(s => s.id));
     remoteLiveStrokesRef.current.forEach((_, strokeId) => {
       if (committedIds.has(strokeId)) {
@@ -205,7 +194,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
     redrawCanvas();
   }, [strokes, redrawCanvas]);
 
-  // Đăng ký lắng nghe nét vẽ thời gian thực từ đối phương
   useEffect(() => {
     const handleRemoteLive = (draw: WhiteboardLiveDraw) => {
       const existing = remoteLiveStrokesRef.current.get(draw.strokeId);
@@ -218,12 +206,10 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
         });
       }
 
-      // Vẽ ngay đoạn mới lên canvas để người xem thấy mượt theo từng chuyển động bút
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d');
       const live = remoteLiveStrokesRef.current.get(draw.strokeId);
       if (ctx && live) {
-        // Vẽ lại toàn bộ đoạn live của stroke đó để đảm bảo đường cong liên tục
         const tail = live.points.slice(-Math.max(draw.points.length + 2, 3));
         renderStrokeOnContext(ctx, live.tool, live.color, live.size, tail);
       }
@@ -233,7 +219,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
     return () => registerLiveHandler(null);
   }, [registerLiveHandler]);
 
-  // Theo dõi trạng thái Fullscreen
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(document.fullscreenElement === containerRef.current);
@@ -293,7 +278,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
     const pt = getNormalizedPoint(e);
     const prev = active.points[active.points.length - 1];
 
-    // Lọc bớt các điểm quá sát nhau để giảm nhiễu và tiết kiệm băng thông
     if (prev && Math.hypot(pt.x - prev.x, pt.y - prev.y) < 0.0015) {
       return;
     }
@@ -363,11 +347,9 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
     const ctx = exportCanvas.getContext('2d');
     if (!ctx) return;
 
-    // 1. Nền trắng
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
 
-    // 2. Kẻ ô ly nếu đang bật
     if (showGrid) {
       ctx.strokeStyle = '#e2e8f0';
       ctx.lineWidth = 1;
@@ -386,7 +368,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
       }
     }
 
-    // 3. Chồng lớp nét vẽ lên trên
     ctx.drawImage(inkCanvas, 0, 0);
 
     const link = document.createElement('a');
@@ -399,13 +380,12 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
     <div
       ref={containerRef}
       style={style}
-      className={`group relative overflow-hidden rounded-2xl bg-white border select-none flex items-center justify-center transition-[border-color,box-shadow] duration-200 ${
+      className={`group relative overflow-hidden rounded-2xl bg-surface border select-none flex items-center justify-center shadow-tile transition-colors duration-150 ${
         isPinned
-          ? 'border-brand-500/90 shadow-lg shadow-brand-500/15'
-          : 'border-white/20 hover:border-brand-400/50 shadow-xl'
+          ? 'border-accent ring-2 ring-accent ring-offset-2 ring-offset-canvas'
+          : 'border-line-subtle hover:border-line-strong'
       } ${className}`}
     >
-      {/* Lớp nền kẻ ô ly (CSS tách biệt để tẩy mực không làm mất ô kẻ) */}
       {showGrid && (
         <div
           className="absolute inset-0 pointer-events-none"
@@ -417,7 +397,6 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
         />
       )}
 
-      {/* Lớp Canvas vẽ tương tác độ phân giải logic 1920x1080 */}
       <canvas
         ref={canvasRef}
         width={LOGICAL_WIDTH}
@@ -437,90 +416,100 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
 
       {isThumbnail ? (
         <>
-          {/* Header gọn trong chế độ thumbnail */}
           <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-20 gap-1.5">
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-dark-950/85 backdrop-blur-md border border-white/15 text-[11px] font-medium text-slate-100 pointer-events-auto shadow-sm max-w-[calc(100%-28px)]">
-              <PenTool className="w-3 h-3 text-brand-400 shrink-0" />
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-surface/95 border border-line-subtle shadow-sm text-[11px] font-medium text-ink-primary pointer-events-auto max-w-[calc(100%-28px)]">
+              <PenTool className="w-3 h-3 text-accent shrink-0" strokeWidth={1.75} />
               <span className="truncate">Bảng trắng</span>
             </div>
             {isOwner && onCloseWhiteboard && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onCloseWhiteboard();
                 }}
-                title="Tắt bảng trắng"
-                className="p-1 rounded-md bg-rose-500/90 hover:bg-rose-600 text-white transition-all pointer-events-auto shadow-sm"
+                title="Đóng bảng trắng"
+                className="p-1 rounded-lg bg-surface/95 hover:bg-red-50 text-ink-secondary hover:text-red-600 border border-line-subtle shadow-sm transition-colors pointer-events-auto"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3 h-3" strokeWidth={2} />
               </button>
             )}
           </div>
-          <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-full bg-dark-950/85 text-[9px] font-mono text-brand-400 pointer-events-none z-20">
-            Click để ghim
+          <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-lg bg-surface/95 border border-line-subtle shadow-sm text-[10px] text-ink-secondary pointer-events-none z-20">
+            Nhấp để ghim
           </div>
         </>
       ) : (
         <>
-          {/* Thanh tiêu đề trên cùng */}
+          {/* Top Header */}
           <div className="absolute top-2.5 sm:top-3 left-2.5 sm:left-3 right-2.5 sm:right-3 flex items-center justify-between pointer-events-none z-20 gap-2">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-dark-950/85 backdrop-blur-md border border-white/15 text-xs font-medium text-slate-100 pointer-events-auto shadow-md">
-              <PenTool className="w-3.5 h-3.5 text-brand-400 shrink-0" />
-              <span className="font-semibold">Bảng trắng</span>
-              <span className="text-[10px] text-slate-300 font-mono px-1.5 py-0.5 rounded bg-white/10 hidden sm:inline-block">
-                {isOwner ? 'Bạn mở' : `Mở bởi ${ownerName || 'Đối phương'}`}
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-surface/95 border border-line-subtle shadow-sm text-xs font-medium text-ink-primary pointer-events-auto">
+              <PenTool className="w-3.5 h-3.5 text-accent shrink-0" strokeWidth={1.75} />
+              <span>Bảng trắng</span>
+              <span className="text-[11px] text-ink-secondary border-l border-line-subtle pl-2 hidden sm:inline">
+                {isOwner ? 'Bạn mở' : `Mở bởi ${ownerName || 'đối phương'}`}
               </span>
             </div>
 
             <div className="flex items-center gap-1 pointer-events-auto shrink-0">
               {onTogglePin && (
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onTogglePin('whiteboard');
                   }}
-                  title={isPinned ? 'Bỏ ghim (Unpin)' : 'Ghim phóng to bảng trắng'}
-                  className={`p-1.5 rounded-lg backdrop-blur-md transition-all text-xs shadow-sm ${
+                  title={isPinned ? 'Bỏ ghim' : 'Ghim bảng trắng'}
+                  className={`p-1.5 rounded-lg border shadow-sm transition-colors ${
                     isPinned
-                      ? 'bg-brand-500 text-slate-950 font-bold'
-                      : 'bg-dark-950/80 border border-white/15 text-slate-200 hover:bg-dark-900'
+                      ? 'bg-accent border-accent text-white'
+                      : 'bg-surface/95 border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface'
                   }`}
                 >
-                  {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                  {isPinned ? (
+                    <PinOff className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  ) : (
+                    <Pin className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  )}
                 </button>
               )}
 
               <button
+                type="button"
                 onClick={toggleFullscreen}
-                title={isFullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'}
-                className="p-1.5 rounded-lg bg-dark-950/80 border border-white/15 text-slate-200 hover:bg-dark-900 backdrop-blur-md transition-all text-xs shadow-sm"
+                title={isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}
+                className="p-1.5 rounded-lg bg-surface/95 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface shadow-sm transition-colors"
               >
-                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                {isFullscreen ? (
+                  <Minimize2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                ) : (
+                  <Maximize2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                )}
               </button>
 
               {isOwner && onCloseWhiteboard && (
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onCloseWhiteboard();
                   }}
-                  title="Tắt bảng trắng"
-                  className="p-1.5 rounded-lg bg-rose-500/90 hover:bg-rose-600 text-white transition-all text-xs shadow-sm"
+                  title="Đóng bảng trắng"
+                  className="p-1.5 rounded-lg bg-surface/95 border border-line-subtle text-ink-secondary hover:text-red-600 hover:bg-red-50 hover:border-red-200 shadow-sm transition-colors"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-3.5 h-3.5" strokeWidth={1.75} />
                 </button>
               )}
             </div>
           </div>
 
-          {/* Thanh công cụ vẽ nổi phía dưới */}
+          {/* Bottom Drawing Toolbar */}
           <div
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute bottom-2.5 sm:bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-2xl bg-dark-950/90 backdrop-blur-md border border-white/15 shadow-2xl max-w-[95%]"
+            className="absolute bottom-2.5 sm:bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-xl bg-surface/95 border border-line-subtle shadow-dock max-w-[95%]"
           >
-            {/* Chọn màu bút */}
-            <div className="flex items-center gap-1 pr-1 border-r border-white/15">
+            <div className="flex items-center gap-1.5 pr-2 border-r border-line-subtle">
               {PEN_COLORS.map(c => (
                 <button
                   key={c.value}
@@ -530,42 +519,40 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
                     setTool('pen');
                     setColor(c.value);
                   }}
-                  className={`w-5 h-5 rounded-full border-2 transition-transform ${
+                  className={`w-4 h-4 rounded-full border transition-transform ${
                     tool === 'pen' && color === c.value
-                      ? 'border-white scale-110 ring-2 ring-brand-400/60'
-                      : 'border-white/30 hover:scale-105'
+                      ? 'border-white scale-110 ring-2 ring-accent'
+                      : 'border-black/15 hover:scale-105'
                   }`}
                   style={{ backgroundColor: c.value }}
                 />
               ))}
             </div>
 
-            {/* Tẩy */}
             <button
               type="button"
               title="Tẩy"
               onClick={() => setTool('eraser')}
-              className={`p-1.5 rounded-lg transition-all ${
+              className={`p-1.5 rounded-lg transition-colors ${
                 tool === 'eraser'
-                  ? 'bg-brand-500 text-slate-950 font-bold'
-                  : 'text-slate-200 hover:bg-white/10'
+                  ? 'bg-accent text-white'
+                  : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-muted'
               }`}
             >
-              <Eraser className="w-3.5 h-3.5" />
+              <Eraser className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
 
-            {/* Độ dày nét */}
-            <div className="flex items-center gap-1 px-1 border-x border-white/15">
+            <div className="flex items-center gap-1 px-1.5 border-x border-line-subtle">
               {STROKE_SIZES.map(s => (
                 <button
                   key={s.label}
                   type="button"
                   title={`Nét ${s.label}`}
                   onClick={() => setSize(s.value)}
-                  className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all ${
+                  className={`w-6 h-6 rounded-lg flex items-center justify-center transition-colors ${
                     size === s.value
-                      ? 'bg-white/20 text-white ring-1 ring-brand-400'
-                      : 'text-slate-300 hover:bg-white/10'
+                      ? 'bg-accent-soft text-accent ring-1 ring-accent'
+                      : 'text-ink-secondary hover:bg-surface-muted'
                   }`}
                 >
                   <span className={`rounded-full bg-current ${s.dotClass}`} />
@@ -573,48 +560,44 @@ export const WhiteboardTile: React.FC<WhiteboardTileProps> = ({
               ))}
             </div>
 
-            {/* Hoàn tác nét của mình */}
             <button
               type="button"
-              title="Hoàn tác nét vẽ gần nhất của bạn"
+              title="Hoàn tác nét vẽ gần nhất"
               onClick={onUndo}
-              className="p-1.5 rounded-lg text-slate-200 hover:bg-white/10 transition-all"
+              className="p-1.5 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-surface-muted transition-colors"
             >
-              <Undo2 className="w-3.5 h-3.5" />
+              <Undo2 className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
 
-            {/* Nền kẻ ô */}
             <button
               type="button"
               title={showGrid ? 'Ẩn kẻ ô' : 'Hiện nền kẻ ô ly'}
               onClick={onToggleGrid}
-              className={`p-1.5 rounded-lg transition-all ${
+              className={`p-1.5 rounded-lg transition-colors ${
                 showGrid
-                  ? 'bg-sky-500/25 text-sky-300 border border-sky-500/40'
-                  : 'text-slate-200 hover:bg-white/10'
+                  ? 'bg-accent text-white'
+                  : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-muted'
               }`}
             >
-              <Grid3X3 className="w-3.5 h-3.5" />
+              <Grid3X3 className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
 
-            {/* Xóa sạch */}
             <button
               type="button"
               title="Xóa toàn bộ bảng trắng"
               onClick={onClear}
-              className="p-1.5 rounded-lg text-rose-300 hover:bg-rose-500/20 transition-all"
+              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
 
-            {/* Tải ảnh PNG */}
             <button
               type="button"
-              title="Tải bảng trắng về dạng ảnh PNG"
+              title="Tải ảnh PNG"
               onClick={handleDownloadPng}
-              className="p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-500/20 transition-all"
+              className="p-1.5 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-surface-muted transition-colors"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
           </div>
         </>

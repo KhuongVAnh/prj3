@@ -3,16 +3,10 @@
  * MODULE: CLIENT COMPONENTS - VIDEO TILE (KHUNG HIỂN THỊ LUỒNG VIDEO)
  * ============================================================================
  * Component hiển thị một luồng video đơn lẻ (cục bộ hoặc từ đối phương):
- *  1. Gắn MediaStream vào thẻ HTML5 <video> với chế độ autoplay và muted.
- *  2. Bảo toàn tuyệt đối tỉ lệ khung hình thực tế (True Aspect Ratio) của luồng video
- *     sử dụng object-contain kèm nền tối sang trọng (clean letterboxing/pillarboxing).
- *  3. Báo cáo tỉ lệ khung hình thực tế (aspectRatio) lên VideoGrid để đồng bộ khung chứa.
- *  4. Hỗ trợ chuyển đổi nhanh chế độ Fit (chuẩn tỉ lệ, không mất chi tiết) và Fill (tràn viền).
- *  5. Lật gương hình ảnh (Mirror effect -scale-x-100) đối với webcam vật lý cục bộ.
- *  6. Hiệu ứng viền phát sáng xanh lục (Speaking Indicator ring) khi người này đang nói.
- *  7. Các huy hiệu overlay: Nhãn tên, loại camera, huy hiệu ON AIR phát sáng, trạng thái mic,
- *     nút ghim tiêu điểm (Pin), nút toàn màn hình (Fullscreen), nút đóng camera phụ.
- *  8. Ngăn chặn triệt để click bubbling (e.stopPropagation()) trên các nút hành động.
+ *  - Gắn MediaStream vào thẻ HTML5 <video> với chế độ autoplay và muted.
+ *  - Bảo toàn tỉ lệ khung hình thực tế bằng object-contain (có thể chuyển Fill).
+ *  - Lật gương đối với webcam vật lý cục bộ.
+ *  - Viền Cobalt sắc nét khi người dùng đang nói (Speaking Indicator).
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -24,26 +18,26 @@ import {
   X,
   MicOff,
   Video,
+  VideoOff,
   Monitor,
-  Radio,
   Scaling
 } from 'lucide-react';
 import { CameraType, VideoQualityMode } from '../types';
 
 export interface VideoTileProps {
-  id: string;                         // ID duy nhất của stream
-  stream: MediaStream;                // Luồng video MediaStream
-  label: string;                      // Nhãn tên hiển thị (vd: "Bạn: Facecam", "Bob: Webcam")
-  isLocal: boolean;                   // Luồng này là của máy mình hay nhận từ đối phương
-  type: CameraType;                   // 'physical' | 'screen'
-  isMuted?: boolean;                  // Người này có đang tắt mic hay không
-  isSpeaking?: boolean;               // Người này có đang phát ra tiếng nói hay không
-  isPinned?: boolean;                 // Khung hình có đang được ghim tiêu điểm hay không
-  isThumbnail?: boolean;              // Có phải đang hiển thị ở dải thumbnail thu nhỏ hay không
-  qualityMode?: VideoQualityMode;     // Chế độ chất lượng phát ('high': 1080p | 'grid': 720p | 'low': 360p)
-  onTogglePin?: (id: string) => void; // Hàm ghim/bỏ ghim
-  onRemove?: () => void;              // Hàm đóng luồng camera này (nếu là camera phụ của mình)
-  onAspectRatioChange?: (id: string, ratio: number) => void; // Báo cáo tỉ lệ thực tế của video
+  id: string;
+  stream: MediaStream;
+  label: string;
+  isLocal: boolean;
+  type: CameraType;
+  isMuted?: boolean;
+  isSpeaking?: boolean;
+  isPinned?: boolean;
+  isThumbnail?: boolean;
+  qualityMode?: VideoQualityMode;
+  onTogglePin?: (id: string) => void;
+  onRemove?: () => void;
+  onAspectRatioChange?: (id: string, ratio: number) => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -72,7 +66,6 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
 
-  // Gắn MediaStream vào video element & theo dõi track & độ phân giải
   useEffect(() => {
     const video = videoRef.current;
     if (video && stream) {
@@ -92,7 +85,6 @@ export const VideoTile: React.FC<VideoTileProps> = ({
       }
     };
 
-    // Kiểm tra tỉ lệ ngay từ settings của track nếu có
     if (track && track.getSettings) {
       const s = track.getSettings();
       if (s.width && s.height && s.width > 0 && s.height > 0) {
@@ -151,7 +143,6 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     };
   }, [stream, label, id, onAspectRatioChange]);
 
-  // Đồng bộ trạng thái toàn màn hình (kể cả khi ấn phím ESC ngoài trình duyệt)
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(document.fullscreenElement === containerRef.current);
@@ -171,256 +162,188 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   }, []);
 
   const getBadgeIcon = () => {
-    switch (type) {
-      case 'screen':
-        return <Monitor className="w-3.5 h-3.5 text-sky-400 shrink-0" />;
-      default:
-        return <Video className="w-3.5 h-3.5 text-brand-400 shrink-0" />;
+    if (type === 'screen') {
+      return <Monitor className="w-3.5 h-3.5 text-ink-secondary shrink-0" strokeWidth={1.75} />;
     }
+    return <Video className="w-3.5 h-3.5 text-ink-secondary shrink-0" strokeWidth={1.75} />;
   };
 
-  const getBadgeTypeLabel = () => {
-    switch (type) {
-      case 'screen':
-        return 'Screen Feed';
-      default:
-        return isLocal ? 'You' : 'Peer';
+  const getResolutionTag = () => {
+    if (qualityMode === 'low') {
+      return resolution && resolution.height > 0 && resolution.height <= 540
+        ? `${resolution.height}p`
+        : '360p';
     }
+    if (qualityMode === 'grid') {
+      return resolution && resolution.height > 0 && resolution.height < 720
+        ? `${resolution.height}p`
+        : '720p';
+    }
+    return resolution && resolution.width >= 1920 ? '1080p' : 'HD';
   };
 
   return (
     <div
       ref={containerRef}
       style={style}
-      className={`group relative overflow-hidden rounded-2xl bg-[#090b0e] border select-none flex items-center justify-center transition-[border-color,box-shadow,background-color] duration-200 ${
+      className={`group relative overflow-hidden rounded-2xl border select-none flex items-center justify-center shadow-tile transition-[border-color,box-shadow] duration-150 ${
+        isVideoActive ? 'bg-surface-video' : 'bg-surface-muted'
+      } ${
         isSpeaking
-          ? 'border-brand-500 shadow-[0_0_24px_-2px_rgba(16,185,129,0.55)]'
+          ? 'border-accent ring-2 ring-accent ring-offset-2 ring-offset-canvas'
           : isPinned
-          ? 'border-brand-500/80 shadow-lg shadow-brand-500/10'
-          : 'border-white/10 hover:border-white/25'
+          ? 'border-line-strong'
+          : 'border-line-subtle hover:border-line-strong'
       } ${className}`}
     >
-      {/* Video Element - Luôn hiển thị đúng tỉ lệ thực tế bằng object-contain (mặc định) */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted={true} // Dedicated audio element in useWebRTC handles voice playback, avoiding double audio and autoplay block
+        muted={true}
         className={`w-full h-full ${
           fitMode === 'cover' ? 'object-cover' : 'object-contain'
-        } transition-opacity duration-200 ${
+        } transition-opacity duration-150 ${
           isVideoActive ? 'opacity-100' : 'opacity-0'
         } ${isLocal && type === 'physical' ? '-scale-x-100' : ''}`}
       />
 
-      {/* Fallback placeholder nếu video tạm dừng hoặc chưa có tín hiệu */}
       {!isVideoActive && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-dark-950/85 backdrop-blur-md z-0">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-dark-850 border border-white/10 flex items-center justify-center text-slate-400 mb-2 shadow-xl">
-            <Radio className="w-6 h-6 sm:w-8 sm:h-8 animate-pulse text-brand-500" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface-subtle z-0 px-4 text-center">
+          <div className="w-11 h-11 rounded-xl bg-surface border border-line-subtle flex items-center justify-center mb-2.5 text-ink-secondary shadow-sm">
+            <VideoOff className="w-5 h-5" strokeWidth={1.75} />
           </div>
-          <span className="text-xs sm:text-sm font-medium text-slate-300">Camera Feed Paused</span>
+          <span className="text-xs font-medium text-ink-secondary">Tín hiệu camera tạm dừng</span>
         </div>
       )}
 
-      {/* Speaking Indicator Outline Glow */}
-      {isSpeaking && (
-        <div className="absolute inset-0 pointer-events-none rounded-2xl ring-2 ring-brand-500 ring-offset-2 ring-offset-dark-950 animate-pulse z-10" />
-      )}
-
-      {/* ==================================================================== */}
-      {/* OVERLAY: CHẾ ĐỘ THUMBNAIL NHỎ GỌN TRONG SPOTLIGHT SIDEBAR / STRIP   */}
-      {/* ==================================================================== */}
       {isThumbnail ? (
         <>
-          {/* Top thumbnail overlay */}
           <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10 gap-1.5">
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-dark-950/85 backdrop-blur-md border border-white/10 text-[11px] font-medium text-slate-200 pointer-events-auto shadow-sm max-w-[calc(100%-28px)]">
-              {getBadgeIcon()}
-              <span className="truncate max-w-[90px]">{label}</span>
-              {qualityMode === 'low' ? (
-                <span className="text-[9px] font-mono px-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {resolution && resolution.height > 0 && resolution.height <= 540 ? `${resolution.height}p` : '360p'}
-                </span>
-              ) : qualityMode === 'grid' ? (
-                <span className="text-[9px] font-mono font-bold px-1 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                  720p
-                </span>
-              ) : (
-                <span className="text-[9px] font-mono font-bold px-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  {resolution && resolution.width >= 1920 ? '1080p' : 'HD'}
-                </span>
-              )}
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white/95 border border-line-subtle text-[11px] font-medium text-ink-primary shadow-sm pointer-events-auto max-w-[calc(100%-28px)]">
+              <span className="truncate">{label}</span>
+              <span className="text-[10px] font-mono text-ink-muted shrink-0">
+                {getResolutionTag()}
+              </span>
             </div>
 
             {isLocal && onRemove && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemove();
                 }}
-                title="Tắt camera này"
-                className="p-1 rounded-md bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 border border-rose-500/30 transition-all pointer-events-auto"
+                title="Tắt nguồn này"
+                className="p-1 rounded-lg bg-white/95 hover:bg-red-50 text-ink-secondary hover:text-red-600 border border-line-subtle shadow-sm transition-colors pointer-events-auto"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3 h-3" strokeWidth={2} />
               </button>
             )}
           </div>
 
-          {/* Bottom thumbnail overlay */}
-          <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
-            <div className="pointer-events-auto">
-              {isMuted && (
-                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[10px]">
-                  <MicOff className="w-2.5 h-2.5" />
-                </div>
-              )}
+          {isMuted && (
+            <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-lg bg-red-50 border border-red-200 text-red-600 shadow-sm z-10">
+              <MicOff className="w-3 h-3" strokeWidth={1.75} />
             </div>
-            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-dark-950/85 border border-white/10 text-[9px] font-mono text-emerald-400 shadow-sm pointer-events-auto">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-semibold">LIVE</span>
-            </div>
-          </div>
+          )}
         </>
       ) : (
-        /* ==================================================================== */
-        /* OVERLAY: CHẾ ĐỘ TIÊU CHUẨN ĐẦY ĐỦ CHO TOÀN BỘ CÁC KHUNG VIDEO CHÍNH  */
-        /* ==================================================================== */
         <>
-          {/* Top Overlay Bar */}
-          <div className="absolute top-2.5 sm:top-3 left-2.5 sm:left-3 right-2.5 sm:right-3 flex items-center justify-between pointer-events-none z-10 gap-2 transition-opacity duration-200 opacity-90 group-hover:opacity-100">
-            {/* Source Badge */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-dark-950/85 backdrop-blur-md border border-white/10 text-xs font-medium text-slate-200 pointer-events-auto shadow-md max-w-[calc(100%-110px)] sm:max-w-none">
+          {/* Top Overlay */}
+          <div className="absolute top-2.5 sm:top-3 left-2.5 sm:left-3 right-2.5 sm:right-3 flex items-center justify-between pointer-events-none z-10 gap-2">
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/95 border border-line-subtle text-xs text-ink-primary shadow-sm pointer-events-auto max-w-[calc(100%-130px)] sm:max-w-none">
               {getBadgeIcon()}
-              <span className="truncate max-w-[110px] sm:max-w-[170px] font-medium">{label}</span>
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono px-1.5 py-0.5 rounded bg-white/5 shrink-0 hidden xs:inline-block">
-                {getBadgeTypeLabel()}
+              <span className="truncate max-w-[140px] sm:max-w-[200px] font-medium">
+                {label}
               </span>
-
-              {/* Quality Indicator Badge */}
-              {qualityMode === 'low' ? (
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  {resolution && resolution.height > 0 && resolution.height <= 540
-                    ? `${resolution.height}p • Tiết kiệm`
-                    : '360p • Tiết kiệm'}
-                </span>
-              ) : qualityMode === 'grid' ? (
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 shrink-0 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
-                  {resolution && resolution.height > 0 && resolution.height < 720
-                    ? `${resolution.height}p`
-                    : '720p HD'}
-                </span>
-              ) : (
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  {resolution && resolution.width >= 1920 ? '1080p FHD' : 'HD'}
-                </span>
-              )}
+              <span className="text-[11px] font-mono text-ink-secondary shrink-0 border-l border-line-subtle pl-2">
+                {getResolutionTag()}
+              </span>
             </div>
 
-            {/* Action Controls */}
-            <div className="flex items-center gap-1 pointer-events-auto shrink-0">
-              {/* Nút chuyển đổi tỉ lệ hình ảnh: Fit (chuẩn) vs Cover (tràn) */}
+            <div
+              className={`flex items-center gap-1 pointer-events-auto shrink-0 transition-opacity duration-150 ${
+                isPinned
+                  ? 'opacity-100'
+                  : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100'
+              }`}
+            >
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setFitMode(prev => (prev === 'contain' ? 'cover' : 'contain'));
                 }}
-                title={
-                  fitMode === 'contain'
-                    ? 'Chuẩn tỉ lệ (Fit) - Nhấp để chuyển sang Phóng to tràn ô (Fill)'
-                    : 'Phóng to tràn ô (Fill) - Nhấp để về Chuẩn tỉ lệ gốc (Fit)'
-                }
-                className={`p-1.5 rounded-lg backdrop-blur-md transition-all text-xs ${
+                title={fitMode === 'contain' ? 'Phóng to tràn khung' : 'Hiển thị đúng tỉ lệ gốc'}
+                className={`p-1.5 rounded-lg border shadow-sm transition-colors ${
                   fitMode === 'cover'
-                    ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40 shadow-sm'
-                    : 'bg-dark-950/75 border border-white/10 text-slate-300 hover:bg-white/15'
+                    ? 'bg-accent border-accent text-white'
+                    : 'bg-white/95 border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface'
                 }`}
               >
-                <Scaling className="w-3.5 h-3.5" />
+                <Scaling className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
 
-              {/* Nút ghim phóng to tiêu điểm */}
               {onTogglePin && (
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onTogglePin(id);
                   }}
-                  title={isPinned ? 'Bỏ ghim (Unpin)' : 'Ghim phóng to (Pin spotlight)'}
-                  className={`p-1.5 rounded-lg backdrop-blur-md transition-all text-xs ${
+                  title={isPinned ? 'Bỏ ghim' : 'Ghim khung này'}
+                  className={`p-1.5 rounded-lg border shadow-sm transition-colors ${
                     isPinned
-                      ? 'bg-brand-500 text-slate-950 font-bold shadow-md'
-                      : 'bg-dark-950/75 border border-white/10 text-slate-300 hover:bg-white/15'
+                      ? 'bg-accent border-accent text-white'
+                      : 'bg-white/95 border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface'
                   }`}
                 >
-                  {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                  {isPinned ? (
+                    <PinOff className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  ) : (
+                    <Pin className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  )}
                 </button>
               )}
 
-              {/* Nút toàn màn hình */}
               <button
+                type="button"
                 onClick={(e) => toggleFullscreen(e)}
-                title={isFullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'}
-                className="p-1.5 rounded-lg bg-dark-950/75 backdrop-blur-md border border-white/10 text-slate-300 hover:bg-white/15 transition-all text-xs"
+                title={isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}
+                className="p-1.5 rounded-lg bg-white/95 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface shadow-sm transition-colors"
               >
-                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                {isFullscreen ? (
+                  <Minimize2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                ) : (
+                  <Maximize2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                )}
               </button>
 
-              {/* Nút đóng camera phụ của máy mình */}
               {isLocal && onRemove && (
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onRemove();
                   }}
-                  title="Tắt camera này"
-                  className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-all text-xs"
+                  title="Tắt nguồn video này"
+                  className="p-1.5 rounded-lg bg-white/95 border border-line-subtle text-ink-secondary hover:text-red-600 hover:bg-red-50 hover:border-red-200 shadow-sm transition-colors"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-3.5 h-3.5" strokeWidth={1.75} />
                 </button>
               )}
             </div>
           </div>
 
-          {/* Bottom Info Bar */}
-          <div className="absolute bottom-2.5 sm:bottom-3 left-2.5 sm:left-3 right-2.5 sm:right-3 flex items-center justify-between pointer-events-none z-10 gap-2">
-            <div className="flex items-center gap-1.5 pointer-events-auto">
-              {isMuted && (
-                <div className="flex items-center gap-1 px-2 sm:px-2.5 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-medium backdrop-blur-md shadow-sm">
-                  <MicOff className="w-3 h-3" />
-                  <span>Muted</span>
-                </div>
-              )}
-              {isSpeaking && !isMuted && (
-                <div className="flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-md bg-brand-500/20 border border-brand-500/40 text-brand-400 text-xs font-semibold backdrop-blur-md animate-pulse shadow-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-ping" />
-                  <span>Speaking</span>
-                </div>
-              )}
+          {isMuted && (
+            <div className="absolute bottom-2.5 sm:bottom-3 left-2.5 sm:left-3 z-10 pointer-events-none">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50/95 border border-red-200 text-red-700 text-xs font-medium shadow-sm">
+                <MicOff className="w-3 h-3" strokeWidth={1.75} />
+                <span>Đang tắt mic</span>
+              </div>
             </div>
-
-            {/* ON AIR badge */}
-            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-dark-950/85 border border-white/10 text-[11px] font-mono text-emerald-400 backdrop-blur-md shadow-sm pointer-events-auto">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]" />
-              <span className="font-semibold tracking-wider text-[10px]">ON AIR</span>
-              {resolution && (
-                <span className="text-[10px] text-slate-400 font-mono ml-0.5 border-l border-white/10 pl-1.5 hidden sm:inline">
-                  {isLocal && qualityMode === 'low'
-                    ? '360p TX'
-                    : isLocal && qualityMode === 'grid' && resolution.height > 720
-                    ? '720p TX'
-                    : resolution.width >= 1920
-                    ? '1080p'
-                    : resolution.width >= 1280
-                    ? '720p'
-                    : `${resolution.width}x${resolution.height}`}
-                </span>
-              )}
-            </div>
-          </div>
+          )}
         </>
       )}
     </div>

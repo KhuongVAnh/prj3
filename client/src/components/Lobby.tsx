@@ -5,7 +5,7 @@
  * Màn hình chờ kiểm tra thiết bị trước khi bước vào phòng gọi:
  *  - Nhập tên hiển thị và mã phòng họp (hoặc tạo mã phòng ngẫu nhiên tự động).
  *  - Xem trước hình ảnh camera (Local Video Preview) và kiểm tra tín hiệu micro.
- *  - Bật/Tắt camera, micro, hoặc chọn chế độ Camera Ảo trước khi tham gia.
+ *  - Bật/Tắt camera, micro trước khi tham gia.
  *  - Dọn dẹp toàn bộ luồng preview khi chuyển sang màn hình Room để giải phóng phần cứng.
  */
 
@@ -15,11 +15,8 @@ import {
   VideoOff,
   Mic,
   MicOff,
-  ArrowRight,
-  Layers,
-  Shield,
-  Zap,
-  Users
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 
 interface LobbyProps {
@@ -37,29 +34,27 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Initialize random default name if empty
   useEffect(() => {
     const savedName = localStorage.getItem('omnicam_user_name');
     if (savedName) {
       setUserName(savedName);
     } else {
-      const defaultName = `User_${Math.floor(1000 + Math.random() * 9000)}`;
+      const defaultName = `Khách_${Math.floor(1000 + Math.random() * 9000)}`;
       setUserName(defaultName);
     }
   }, []);
 
-  // Đồng bộ mã phòng từ link mời (?room=...) nếu prop initialRoomId thay đổi
   useEffect(() => {
     if (initialRoomId) {
       setRoomId(initialRoomId);
     }
   }, [initialRoomId]);
 
-  // Handle local video & audio preview
   useEffect(() => {
     let cancelled = false;
     let stream: MediaStream | null = null;
@@ -72,10 +67,10 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     }
 
     const setupPreview = async () => {
-      // Cleanup previous
       if (previewStream) {
         previewStream.getTracks().forEach(t => t.stop());
       }
+      setDeviceError(null);
 
       if (isVideoEnabled || isAudioEnabled) {
         try {
@@ -98,7 +93,6 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
           setPreviewStream(stream);
 
-          // Audio meter
           if (isAudioEnabled && stream.getAudioTracks().length > 0) {
             const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
             audioCtx = new AudioCtx();
@@ -119,8 +113,17 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
             };
             animFrameRef.current = requestAnimationFrame(updateMeter);
           }
-        } catch (e) {
+        } catch (e: any) {
           console.warn('[Lobby] Camera/mic access error:', e);
+          if (!cancelled) {
+            if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
+              setDeviceError('Trình duyệt chưa được cấp quyền sử dụng camera hoặc micro.');
+            } else if (e?.name === 'NotReadableError') {
+              setDeviceError('Camera đang được ứng dụng khác sử dụng.');
+            } else {
+              setDeviceError('Không thể truy cập thiết bị ghi hình hoặc âm thanh.');
+            }
+          }
         }
       } else {
         setPreviewStream(null);
@@ -144,7 +147,6 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     };
   }, [isVideoEnabled, isAudioEnabled]);
 
-  // Bind video element
   useEffect(() => {
     if (videoRef.current && previewStream) {
       videoRef.current.srcObject = previewStream;
@@ -154,10 +156,9 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
     const finalRoom = roomId.trim().toLowerCase() || generateRandomRoomCode();
-    const finalName = userName.trim() || 'Guest';
+    const finalName = userName.trim() || 'Khách';
     localStorage.setItem('omnicam_user_name', finalName);
 
-    // Stop lobby stream before entering room
     if (previewStream) {
       previewStream.getTracks().forEach(t => t.stop());
     }
@@ -170,190 +171,191 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
   };
 
   return (
-    <div className="min-h-screen bg-dark-950 flex flex-col justify-between p-4 sm:p-8">
-      {/* Top Navbar */}
-      <header className="max-w-6xl w-full mx-auto flex items-center justify-between py-2">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400">
-            <Layers className="w-5 h-5" />
+    <div className="min-h-[100dvh] bg-canvas flex flex-col">
+      {/* Top Bar */}
+      <header className="h-16 px-4 sm:px-8 border-b border-line-subtle bg-surface shrink-0">
+        <div className="max-w-6xl w-full h-full mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-white">
+              <Video className="w-4 h-4" strokeWidth={2} />
+            </div>
+            <span className="text-base font-semibold tracking-tight text-ink-primary">
+              OmniCam
+            </span>
           </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-slate-100 flex items-center gap-2">
-              OmniCam <span className="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20 font-mono">Multi-Cam WebRTC</span>
-            </h1>
-            <p className="text-xs text-slate-400">1-on-1 Multi-Camera Video Collaboration</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/5">
-            <Shield className="w-3.5 h-3.5 text-brand-400" /> End-to-End P2P
+          <span className="text-xs font-medium text-ink-secondary">
+            Gọi video 1-1 đa góc quay
           </span>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="max-w-6xl w-full mx-auto my-auto py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-        {/* Left Side: Camera Preview */}
-        <div className="lg:col-span-7 flex flex-col items-center">
-          <div className="relative w-full aspect-video rounded-3xl bg-dark-900 border border-white/10 shadow-2xl overflow-hidden group">
-            {/* Video element */}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`w-full h-full object-contain -scale-x-100 ${!isVideoEnabled ? 'hidden' : 'block'}`}
-            />
+      {/* Main Content */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-8 py-8 lg:py-12 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+        {/* Left: Framed Preview Monitor */}
+        <div className="lg:col-span-7 flex flex-col">
+          <div className="rounded-2xl bg-surface p-2 border border-line-subtle shadow-card">
+            <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-surface-subtle">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-contain bg-surface-video -scale-x-100 ${
+                  !isVideoEnabled ? 'hidden' : 'block'
+                }`}
+              />
 
-            {/* Video off placeholder */}
-            {!isVideoEnabled && (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-dark-900">
-                <div className="w-20 h-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 mb-3">
-                  <VideoOff className="w-8 h-8" />
+              {!isVideoEnabled && (
+                <div className="w-full h-full flex flex-col items-center justify-center px-6 text-center bg-surface-subtle">
+                  <div className="w-12 h-12 rounded-xl bg-surface border border-line-subtle flex items-center justify-center mb-3 text-ink-secondary">
+                    <VideoOff className="w-5 h-5" strokeWidth={1.75} />
+                  </div>
+                  <p className="text-sm font-medium text-ink-primary">Camera đang tắt</p>
+                  <p className="text-xs text-ink-secondary mt-1 max-w-xs">
+                    Bạn có thể bật lại bên dưới hoặc vào phòng chỉ với âm thanh.
+                  </p>
                 </div>
-                <span className="text-sm font-medium text-slate-300">Camera is turned off</span>
-                <span className="text-xs text-slate-500 mt-1">You can turn it on below or join without camera</span>
-              </div>
-            )}
+              )}
 
-            {/* Top badges */}
-            <div className="absolute top-4 left-4 flex items-center gap-2">
-              <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-dark-950/80 backdrop-blur-md border border-white/10 text-xs font-semibold text-slate-200">
-                <Video className="w-3.5 h-3.5 text-brand-400" />
-                <span>Webcam Preview</span>
-              </span>
+              <div className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-white/90 border border-line-subtle text-xs font-medium text-ink-primary shadow-sm">
+                Xem trước camera
+              </div>
+            </div>
+          </div>
+
+          {deviceError && (
+            <div className="mt-3 flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{deviceError}</span>
+            </div>
+          )}
+
+          {/* Device Control Strip */}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsAudioEnabled(!isAudioEnabled)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium border transition-colors active:translate-y-[1px] ${
+                  isAudioEnabled
+                    ? 'bg-surface border-line-subtle text-ink-primary hover:bg-surface-muted shadow-sm'
+                    : 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+                }`}
+              >
+                {isAudioEnabled ? (
+                  <Mic className="w-4 h-4 text-ink-secondary" strokeWidth={1.75} />
+                ) : (
+                  <MicOff className="w-4 h-4 text-red-600" strokeWidth={1.75} />
+                )}
+                <span>{isAudioEnabled ? 'Micro đang bật' : 'Micro đang tắt'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsVideoEnabled(!isVideoEnabled)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium border transition-colors active:translate-y-[1px] ${
+                  isVideoEnabled
+                    ? 'bg-surface border-line-subtle text-ink-primary hover:bg-surface-muted shadow-sm'
+                    : 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+                }`}
+              >
+                {isVideoEnabled ? (
+                  <Video className="w-4 h-4 text-ink-secondary" strokeWidth={1.75} />
+                ) : (
+                  <VideoOff className="w-4 h-4 text-red-600" strokeWidth={1.75} />
+                )}
+                <span>{isVideoEnabled ? 'Camera đang bật' : 'Camera đang tắt'}</span>
+              </button>
             </div>
 
-            {/* Audio Volume Bar (Bottom overlay) */}
             {isAudioEnabled && (
-              <div className="absolute bottom-4 left-4 right-4 flex items-center gap-2 px-3 py-2 rounded-xl bg-dark-950/80 backdrop-blur-md border border-white/10 text-xs text-slate-300">
-                <Mic className="w-3.5 h-3.5 text-brand-400 shrink-0" />
-                <span className="text-[11px] font-mono shrink-0">Mic Level:</span>
-                <div className="flex-1 h-2 rounded-full bg-dark-800 overflow-hidden">
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surface border border-line-subtle text-xs text-ink-secondary shadow-sm">
+                <span>Tín hiệu mic</span>
+                <div className="w-24 h-1.5 rounded-full bg-surface-muted overflow-hidden">
                   <div
-                    className="h-full bg-brand-500 transition-all duration-75 rounded-full"
+                    className="h-full bg-accent transition-all duration-75 rounded-full"
                     style={{ width: `${audioLevel}%` }}
                   />
                 </div>
-                <span className="text-[10px] font-mono text-slate-400 w-8 text-right">{audioLevel}%</span>
+                <span className="font-mono text-[11px] tabular-nums text-ink-muted w-8 text-right">
+                  {audioLevel}%
+                </span>
               </div>
             )}
           </div>
-
-          {/* Quick Toggles */}
-          <div className="flex items-center gap-3 mt-4">
-            <button
-              onClick={() => setIsAudioEnabled(!isAudioEnabled)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all ${
-                isAudioEnabled
-                  ? 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/15'
-                  : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-              }`}
-            >
-              {isAudioEnabled ? <Mic className="w-4 h-4 text-brand-400" /> : <MicOff className="w-4 h-4" />}
-              <span>{isAudioEnabled ? 'Mic Active' : 'Mic Muted'}</span>
-            </button>
-
-            <button
-              onClick={() => setIsVideoEnabled(!isVideoEnabled)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all ${
-                isVideoEnabled
-                  ? 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/15'
-                  : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-              }`}
-            >
-              {isVideoEnabled ? <Video className="w-4 h-4 text-brand-400" /> : <VideoOff className="w-4 h-4" />}
-              <span>{isVideoEnabled ? 'Webcam Active' : 'Webcam Off'}</span>
-            </button>
-          </div>
         </div>
 
-        {/* Right Side: Join / Create Form */}
-        <div className="lg:col-span-5 flex flex-col justify-center">
-          <div className="p-7 rounded-3xl bg-dark-900 border border-white/10 shadow-2xl">
-            <h2 className="text-xl font-bold text-slate-100 mb-1">Join or Create Video Room</h2>
-            <p className="text-xs text-slate-400 mb-6">
-              Connect 1-on-1 and stream multiple camera angles (facecam + desk cam + screen) at the same time.
+        {/* Right: Clean White Join Card */}
+        <div className="lg:col-span-5">
+          <div className="p-7 sm:p-8 rounded-2xl bg-surface border border-line-subtle shadow-card">
+            <h1 className="text-xl font-semibold tracking-tight text-ink-primary">
+              Tham gia phòng họp
+            </h1>
+            <p className="text-sm text-ink-secondary mt-1.5 mb-6 leading-relaxed">
+              Phát đồng thời nhiều webcam, chia sẻ màn hình và bảng trắng trong cùng cuộc gọi 1-1.
             </p>
 
             <form onSubmit={handleJoin} className="space-y-4">
-              {/* Name Input */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase tracking-wider">
-                  Your Display Name
+                <label
+                  htmlFor="lobby-user-name"
+                  className="block text-xs font-medium text-ink-primary mb-1.5"
+                >
+                  Tên hiển thị
                 </label>
                 <input
+                  id="lobby-user-name"
                   type="text"
                   required
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
-                  placeholder="e.g. Alex Hunter"
-                  className="w-full px-4 py-3 rounded-2xl bg-dark-950 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500/50"
+                  placeholder="Ví dụ: Minh Anh"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-subtle border border-line-subtle text-sm text-ink-primary placeholder:text-ink-muted focus:outline-none focus:bg-surface focus:border-accent focus:ring-2 focus:ring-accent/15 transition-colors"
                 />
               </div>
 
-              {/* Room Code Input */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Room Code / ID
+                  <label
+                    htmlFor="lobby-room-id"
+                    className="block text-xs font-medium text-ink-primary"
+                  >
+                    Mã phòng
                   </label>
                   <button
                     type="button"
                     onClick={handleCreateNewRoom}
-                    className="text-xs text-brand-400 hover:text-brand-300 font-medium"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover transition-colors"
                   >
-                    Generate New Code
+                    <RefreshCw className="w-3 h-3" strokeWidth={1.75} />
+                    <span>Tạo mã mới</span>
                   </button>
                 </div>
                 <input
+                  id="lobby-room-id"
                   type="text"
                   required
                   value={roomId}
                   onChange={(e) => setRoomId(e.target.value)}
-                  placeholder="e.g. meet-812-493"
-                  className="w-full px-4 py-3 rounded-2xl bg-dark-950 border border-white/10 text-sm font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500/50"
+                  placeholder="meet-123-456"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-subtle border border-line-subtle text-sm font-mono text-ink-primary placeholder:text-ink-muted focus:outline-none focus:bg-surface focus:border-accent focus:ring-2 focus:ring-accent/15 transition-colors"
                 />
               </div>
 
-              {/* Join Button */}
               <button
                 type="submit"
-                className="w-full py-3.5 px-6 rounded-2xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold text-sm transition-all shadow-xl shadow-brand-500/20 flex items-center justify-center gap-2 group mt-2"
+                className="w-full py-3 px-4 rounded-xl bg-accent hover:bg-accent-hover active:translate-y-[1px] text-white font-medium text-sm transition-colors mt-2 shadow-sm"
               >
-                <span>Enter Room Now</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                Vào phòng
               </button>
             </form>
 
-            {/* Feature Highlights */}
-            <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-3 text-xs text-slate-400">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-brand-400 shrink-0" />
-                <span>Private 1-on-1 Call</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-brand-400 shrink-0" />
-                <span>Simultaneous Multi-Cam</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-brand-400 shrink-0" />
-                <span>HD Physical Feeds</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-brand-400 shrink-0" />
-                <span>Zero Latency P2P</span>
-              </div>
-            </div>
+            <p className="mt-5 pt-4 border-t border-line-subtle text-xs text-ink-muted leading-relaxed">
+              Bạn có thể bật thêm webcam phụ hoặc chia sẻ màn hình ngay sau khi vào phòng.
+            </p>
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="max-w-6xl w-full mx-auto text-center py-4 border-t border-white/5 text-xs text-slate-500 font-mono">
-        OmniCam WebRTC Engine • Multi-Camera Unified Plan Dynamic Renegotiation
-      </footer>
     </div>
   );
 };

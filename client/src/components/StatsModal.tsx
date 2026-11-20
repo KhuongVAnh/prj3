@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { X, Activity, Wifi, ShieldCheck, Zap } from 'lucide-react';
+import { X, Activity } from 'lucide-react';
 import { WebRTCStats } from '../types';
 
 interface StatsModalProps {
@@ -54,141 +54,125 @@ export const StatsModal: React.FC<StatsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-md rounded-3xl bg-dark-900 border border-white/10 shadow-2xl overflow-hidden animate-scale-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-primary/35 backdrop-blur-[2px] animate-fade-in">
+      <div className="relative w-full max-w-md rounded-2xl bg-surface border border-line-subtle shadow-card overflow-hidden animate-scale-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-dark-850">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-line-subtle bg-surface">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <Activity className="w-4 h-4" />
-            </div>
+            <Activity className="w-4 h-4 text-accent" strokeWidth={1.75} />
             <div>
-              <h3 className="text-sm font-bold text-slate-100">WebRTC Diagnostics</h3>
-              <p className="text-[11px] text-slate-400">Realtime P2P Telemetry & State</p>
+              <h3 className="text-sm font-semibold text-ink-primary">Thông số kết nối WebRTC</h3>
+              <p className="text-xs text-ink-secondary">Giám sát đường truyền P2P theo thời gian thực</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-colors"
+            title="Đóng"
+            className="p-1.5 rounded-xl text-ink-secondary hover:text-ink-primary hover:bg-surface-muted transition-colors"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4" strokeWidth={1.75} />
           </button>
         </div>
 
-        {/* Stats Grid */}
-        <div className="p-6 space-y-4">
+        {/* Body */}
+        <div className="p-5 space-y-4 bg-surface-subtle">
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5">
-              <span className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
-                Connection
-              </span>
-              <div className="flex items-center gap-1.5">
+            <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
+              <span className="text-xs text-ink-secondary block mb-1">Trạng thái</span>
+              <div className="flex items-center gap-2">
                 <span
-                  className={`w-2 h-2 rounded-full ${
-                    peerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    peerConnected ? 'bg-emerald-600' : 'bg-amber-500'
                   }`}
                 />
-                <span className="text-sm font-bold text-slate-200">
-                  {peerConnected ? 'P2P Active' : 'Waiting Peer'}
+                <span className="text-sm font-semibold text-ink-primary">
+                  {peerConnected ? 'Đang kết nối' : 'Đang chờ'}
                 </span>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5">
-              <span className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
-                Round-Trip Time
-              </span>
-              <div className="flex items-center gap-1 text-sm font-bold text-slate-200">
-                <Wifi className="w-3.5 h-3.5 text-brand-400" />
-                <span>{stats?.rtt ? `${stats.rtt} ms` : 'Local / < 5 ms'}</span>
+            <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
+              <span className="text-xs text-ink-secondary block mb-1">Độ trễ RTT</span>
+              <div className="text-sm font-semibold font-mono tabular-nums text-ink-primary">
+                {stats?.rtt ? `${stats.rtt} ms` : 'Dưới 5 ms'}
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5">
-              <span className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
-                Framerate & Res
-              </span>
-              <div className="text-sm font-bold text-slate-200">
+            <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
+              <span className="text-xs text-ink-secondary block mb-1">Khung hình</span>
+              <div className="text-sm font-semibold font-mono tabular-nums text-ink-primary">
                 {stats?.fps ? `${stats.fps} FPS` : '30 FPS'}{' '}
-                <span className="text-xs font-normal text-slate-400 font-mono">
-                  ({stats?.resolution || '720p HD'})
+                <span className="text-xs font-normal text-ink-secondary">
+                  ({stats?.resolution || '720p'})
                 </span>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5">
-              <span className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
-                Packets Lost
-              </span>
-              <div className="text-sm font-bold text-slate-200">
+            <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
+              <span className="text-xs text-ink-secondary block mb-1">Gói tin mất</span>
+              <div className="text-sm font-semibold font-mono tabular-nums text-ink-primary">
                 {stats?.packetsLost !== undefined ? stats.packetsLost : '0'}
               </div>
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-dark-850/80 border border-white/10 space-y-2 text-xs">
-            <div className="flex justify-between items-center text-slate-400">
-              <span>Room ID:</span>
-              <span className="font-mono text-slate-200 font-semibold">{roomId}</span>
+          <div className="rounded-xl bg-surface border border-line-subtle divide-y divide-line-subtle text-xs">
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Mã phòng</span>
+              <span className="font-mono text-ink-primary font-medium">{roomId}</span>
             </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span>Negotiation Role:</span>
-              <span className="font-mono text-slate-200">
-                {isPolite ? 'Polite Peer (Auto-yielding)' : 'Impolite Peer (Initiator)'}
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Vai trò đàm phán</span>
+              <span className="font-mono text-ink-primary">
+                {isPolite ? 'Polite Peer' : 'Impolite Peer'}
               </span>
             </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span>Multi-Track Topology:</span>
-              <span className="font-mono text-emerald-400 flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5" /> Unified Plan P2P
-              </span>
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Cơ chế SDP</span>
+              <span className="font-mono text-ink-primary">Unified Plan</span>
             </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span>ICE State:</span>
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Trạng thái ICE</span>
               <span
-                className={`font-mono font-semibold ${
+                className={`font-mono font-medium ${
                   iceConnectionState === 'connected' || iceConnectionState === 'completed'
-                    ? 'text-emerald-400'
+                    ? 'text-emerald-700'
                     : iceConnectionState === 'failed'
-                    ? 'text-rose-400'
-                    : 'text-amber-300'
+                    ? 'text-red-600'
+                    : 'text-amber-700'
                 }`}
               >
                 {iceConnectionState}
               </span>
             </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span>Network Path:</span>
-              <span className="font-mono text-slate-200">{formatCandidateType(stats?.candidateType)}</span>
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Đường truyền</span>
+              <span className="font-mono text-ink-primary">{formatCandidateType(stats?.candidateType)}</span>
             </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span>TURN Relay Server:</span>
-              <span className={`font-mono ${hasTurnServer ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {hasTurnServer ? 'Configured (Active)' : 'STUN Only (No TURN)'}
-              </span>
-            </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span>Dynamic Renegotiation:</span>
-              <span className="font-mono text-sky-400 flex items-center gap-1">
-                <Zap className="w-3.5 h-3.5" /> Perfect Negotiation
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Máy chủ TURN</span>
+              <span className={`font-mono ${hasTurnServer ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {hasTurnServer ? 'Đã cấu hình' : 'Chỉ dùng STUN'}
               </span>
             </div>
           </div>
 
           {!hasTurnServer && (
-            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-200 leading-relaxed">
-              Chưa cấu hình TURN Server trên máy chủ. Các cuộc gọi cùng mạng hoặc NAT mở hoạt động bình thường, nhưng kết nối giữa <strong>WiFi ↔ 4G</strong> hoặc <strong>WiFi trường học/công ty</strong> có thể bị chặn bởi Firewall nếu thiếu TURN.
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
+              Chưa cấu hình TURN Server. Kết nối trong cùng mạng hoặc NAT mở vẫn hoạt động bình thường, nhưng kết nối giữa WiFi và 4G hoặc mạng có tường lửa chặt có thể bị chặn.
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-white/10 bg-dark-850 flex justify-end">
+        <div className="px-5 py-3 border-t border-line-subtle bg-surface flex justify-end">
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-slate-200 transition-colors"
+            className="px-4 py-2 rounded-xl bg-surface-subtle hover:bg-surface-muted border border-line-subtle text-xs font-medium text-ink-primary transition-colors"
           >
-            Close
+            Đóng
           </button>
         </div>
       </div>
