@@ -132,4 +132,7 @@ export interface WebRTCStats {
   videoBitrate?: number;           // Bitrate video
   audioBitrate?: number;           // Bitrate âm thanh
   candidateType?: string;          // Loại kết nối ICE: 'host' (LAN), 'srflx' (STUN WAN), 'relay' (TURN)
+  candidateProtocol?: string;      // Giao thức vận chuyển ICE: 'udp' | 'tcp'
+  dtlsState?: string;              // Trạng thái bắt tay mã hóa DTLS-SRTP
+  connectionState?: RTCPeerConnectionState; // Trạng thái RTCPeerConnection tổng thể
 }

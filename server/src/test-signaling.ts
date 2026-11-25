@@ -413,7 +413,79 @@ async function runSignalingTest() {
 
     wbGuest.disconnect();
 
-    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (11/11) ---');
+    // -------------------------------------------------------------
+    // [Test 12] Epoch-synchronized signal-reconnect-relay deduplication & clientId slot reclaim
+    // -------------------------------------------------------------
+    console.log('[Test 12] Testing epoch-synchronized reconnect-relay & clientId slot reclaim...');
+    const p1: ClientSocketType = ClientSocket(url);
+    const p2: ClientSocketType = ClientSocket(url);
+    let initialEpoch = 0;
+
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        p1.on('connect', () => p1.emit('join-room', { roomId: 'test-room-epoch', userName: 'P1', clientId: 'cid-p1' }));
+        p1.on('room-joined', () => resolve());
+        setTimeout(() => reject(new Error('p1 join timeout')), 3000);
+      }),
+      new Promise<void>((resolve, reject) => {
+        p2.on('connect', () => p2.emit('join-room', { roomId: 'test-room-epoch', userName: 'P2', clientId: 'cid-p2' }));
+        p2.on('room-joined', (data) => {
+          initialEpoch = data.epoch;
+          resolve();
+        });
+        setTimeout(() => reject(new Error('p2 join timeout')), 3000);
+      })
+    ]);
+
+    // Both peers emit reconnect-relay from the same epoch -> server bumps epoch ONCE (deduplicated)
+    await new Promise<void>((resolve, reject) => {
+      const p1Events: any[] = [];
+      const p2Events: any[] = [];
+      p1.on('signal-reconnect-relay', (d) => p1Events.push(d));
+      p2.on('signal-reconnect-relay', (d) => p2Events.push(d));
+
+      p1.emit('signal-reconnect-relay', { mode: 'relay-tls', fromEpoch: initialEpoch });
+      p2.emit('signal-reconnect-relay', { mode: 'relay-tls', fromEpoch: initialEpoch });
+
+      setTimeout(() => {
+        if (
+          p1Events.length === 1 &&
+          p2Events.length === 1 &&
+          p1Events[0].epoch === initialEpoch + 1 &&
+          p2Events[0].epoch === initialEpoch + 1 &&
+          p1Events[0].mode === 'relay-tls'
+        ) {
+          console.log(`✓ Reconnect-relay deduplicated & bumped epoch ${initialEpoch} -> ${p1Events[0].epoch}`);
+          resolve();
+        } else {
+          reject(new Error(`Reconnect deduplication failed: p1=${JSON.stringify(p1Events)}, p2=${JSON.stringify(p2Events)}`));
+        }
+      }, 250);
+    });
+
+    // Reconnecting with same clientId reclaims slot instead of room-full, preserving opposite isPolite roles
+    const p2Reconnected: ClientSocketType = ClientSocket(url);
+    await new Promise<void>((resolve, reject) => {
+      p2Reconnected.on('connect', () => {
+        p2Reconnected.emit('join-room', { roomId: 'test-room-epoch', userName: 'P2', clientId: 'cid-p2' });
+      });
+      p2Reconnected.on('room-full', () => reject(new Error('Same clientId should reclaim slot, not get room-full!')));
+      p2Reconnected.on('room-joined', (data) => {
+        if (data.isPolite === true && data.peers.length === 1) {
+          console.log('✓ Same clientId reclaimed slot cleanly without room-full');
+          resolve();
+        } else {
+          reject(new Error(`Unexpected reclaim payload: ${JSON.stringify(data)}`));
+        }
+      });
+      setTimeout(() => reject(new Error('clientId reclaim timeout')), 3000);
+    });
+
+    p1.disconnect();
+    p2.disconnect();
+    p2Reconnected.disconnect();
+
+    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (12/12) ---');
   } finally {
     await app.close();
   }

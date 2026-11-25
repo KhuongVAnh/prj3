@@ -69,6 +69,7 @@ export interface CameraInfo {
  */
 export interface RoomParticipant {
   id: string;                      // Socket ID duy nhất của kết nối
+  clientId?: string;               // Định danh ổn định theo tab để tái sử dụng slot khi Socket.IO reconnect
   name: string;                    // Tên hiển thị người dùng (nhập từ Lobby)
   joinedAt: number;                // Thời điểm tham gia phòng (Unix timestamp)
   isPolite: boolean;               // Vai trò trong Perfect Negotiation (true: nhường, false: khởi tạo)
@@ -83,6 +84,7 @@ export interface RoomData {
   id: string;                                   // Mã phòng (vd: "meet-123-456")
   participants: Map<string, RoomParticipant>;   // Danh sách thành viên (lưu dưới dạng Map socketId -> Participant)
   createdAt: number;                            // Thời điểm tạo phòng (Unix timestamp)
+  negotiationEpoch: number;                     // Bộ đếm phiên đàm phán WebRTC đồng bộ giữa 2 peer (chống lẫn gói cũ/mới)
   whiteboard: WhiteboardState;                  // Trạng thái Bảng trắng chung của phòng
 }
 

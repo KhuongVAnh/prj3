@@ -64,6 +64,8 @@ export const Room: React.FC<RoomProps> = ({
     stats,
     hasTurnServer,
     iceConnectionState,
+    connectionState,
+    debugLogs,
     localQualityModes,
     sendPinStateUpdate,
     whiteboardState,
@@ -113,19 +115,19 @@ export const Room: React.FC<RoomProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!peerInfo || iceConnectionState === 'connected' || iceConnectionState === 'completed') {
+    if (!peerInfo || connectionState === 'connected') {
       setIsIceStalled(false);
       return;
     }
-    if (iceConnectionState === 'failed') {
+    if (iceConnectionState === 'failed' || connectionState === 'failed') {
       setIsIceStalled(true);
       return;
     }
     const timer = setTimeout(() => {
       setIsIceStalled(true);
-    }, 6000);
+    }, 8000);
     return () => clearTimeout(timer);
-  }, [peerInfo, iceConnectionState]);
+  }, [peerInfo, iceConnectionState, connectionState]);
 
   useEffect(() => {
     const setupInitialMedia = async () => {
@@ -422,6 +424,8 @@ export const Room: React.FC<RoomProps> = ({
         peerConnected={isPeerConnected}
         hasTurnServer={hasTurnServer}
         iceConnectionState={iceConnectionState}
+        connectionState={connectionState}
+        debugLogs={debugLogs}
       />
     </div>
   );

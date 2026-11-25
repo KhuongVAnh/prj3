@@ -74,7 +74,9 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     if (video && stream) {
       video.srcObject = stream;
       video.play().catch(e => {
-        console.warn(`[VideoTile] Autoplay failed for ${label}:`, e);
+        if (e?.name !== 'AbortError') {
+          console.warn(`[VideoTile] Autoplay failed for ${label}:`, e);
+        }
       });
     }
 

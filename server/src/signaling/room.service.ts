@@ -62,8 +62,15 @@ export class RoomService {
   public joinRoom(
     rawRoomId: string,
     socketId: string,
-    userName: string
-  ): { success: boolean; isFull?: boolean; participant?: RoomParticipant; room?: RoomData } {
+    userName: string,
+    clientId?: string
+  ): {
+    success: boolean;
+    isFull?: boolean;
+    participant?: RoomParticipant;
+    room?: RoomData;
+    replacedSocketId?: string;
+  } {
     const roomId = this.sanitizeRoomId(rawRoomId);
     let room = this.rooms.get(roomId);
 
@@ -72,6 +79,7 @@ export class RoomService {
         id: roomId,
         participants: new Map(),
         createdAt: Date.now(),
+        negotiationEpoch: 1,
         whiteboard: {
           isOpen: false,
           ownerId: null,
@@ -81,6 +89,26 @@ export class RoomService {
         }
       };
       this.rooms.set(roomId, room);
+    }
+
+    // Nếu cùng một tab (clientId) reconnect trước khi socket cũ hết pingTimeout -> thay thế slot cũ thay vì báo room-full
+    let replacedSocketId: string | undefined;
+    let preservedCameras: CameraInfo[] = [];
+    let preservedMuted = false;
+    if (clientId) {
+      for (const [existingSocketId, existingParticipant] of room.participants.entries()) {
+        if (existingParticipant.clientId === clientId && existingSocketId !== socketId) {
+          replacedSocketId = existingSocketId;
+          preservedCameras = existingParticipant.cameras;
+          preservedMuted = existingParticipant.isMuted;
+          room.participants.delete(existingSocketId);
+          this.socketToRoomMap.delete(existingSocketId);
+          if (room.whiteboard.ownerId === existingSocketId) {
+            room.whiteboard.ownerId = socketId;
+          }
+          break;
+        }
+      }
     }
 
     // Kiểm tra giới hạn 1-1 (tối đa 2 người)
@@ -93,25 +121,50 @@ export class RoomService {
 
     /**
      * W3C Perfect Negotiation:
-     * - Người tạo phòng (vào đầu tiên): isPolite = false (Impolite initiator)
-     * - Người vào thứ hai: isPolite = true (Polite callee)
+     * Luôn đảm bảo 2 người trong phòng mang vai trò đối lập nhau (1 Impolite, 1 Polite),
+     * kể cả khi người vào đầu rời đi và có người mới thế chỗ.
      */
-    const isFirstParticipant = room.participants.size === 0;
-    const isPolite = !isFirstParticipant;
+    const otherPeer = Array.from(room.participants.values()).find(p => p.id !== socketId);
+    const isPolite = otherPeer ? !otherPeer.isPolite : false;
+
+    // Tăng epoch mỗi khi đủ cặp peer mới để cô lập hoàn toàn với các gói signaling cũ
+    if (otherPeer) {
+      room.negotiationEpoch += 1;
+    }
 
     const participant: RoomParticipant = {
       id: socketId,
+      clientId,
       name: (userName || 'Khách').trim(),
       joinedAt: Date.now(),
       isPolite,
-      cameras: [],
-      isMuted: false
+      cameras: preservedCameras,
+      isMuted: preservedMuted
     };
 
     room.participants.set(socketId, participant);
     this.socketToRoomMap.set(socketId, roomId);
 
-    return { success: true, participant, room };
+    return { success: true, participant, room, replacedSocketId };
+  }
+
+  /**
+   * Tăng bộ đếm phiên đàm phán WebRTC (epoch) một cách nguyên tử trên server để
+   * đồng bộ cả 2 peer khi tạo lại RTCPeerConnection và loại bỏ yêu cầu trùng lặp.
+   */
+  public bumpNegotiationEpoch(
+    roomId: string,
+    fromEpoch?: number
+  ): { bumped: boolean; epoch: number } | null {
+    const room = this.getRoom(roomId);
+    if (!room) return null;
+
+    if (typeof fromEpoch === 'number' && fromEpoch < room.negotiationEpoch) {
+      return { bumped: false, epoch: room.negotiationEpoch };
+    }
+
+    room.negotiationEpoch += 1;
+    return { bumped: true, epoch: room.negotiationEpoch };
   }
 
   /**

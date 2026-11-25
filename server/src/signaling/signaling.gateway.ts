@@ -47,7 +47,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
    * Xử lý khi có client kết nối mới
    */
   handleConnection(client: Socket) {
-    console.log(`[SignalingGateway] Client đã kết nối: ${client.id}`);
+    const transport = client.conn?.transport?.name || 'unknown';
+    console.log(`[SignalingGateway] Client đã kết nối: ${client.id} (transport=${transport})`);
+    client.on('disconnect', (reason: string) => {
+      console.log(`[SignalingGateway] Socket ${client.id} disconnect reason: ${reason}`);
+    });
   }
 
   /**
@@ -65,15 +69,16 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('join-room')
   handleJoinRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; userName: string }
+    @MessageBody() data: { roomId: string; userName: string; clientId?: string }
   ) {
     const cleanRoomId = this.roomService.sanitizeRoomId(data?.roomId);
     const userName = (data?.userName || 'Khách').trim();
+    const clientId = typeof data?.clientId === 'string' && data.clientId.trim() ? data.clientId.trim() : undefined;
 
     // Lưu username vào socket data để truy xuất khi chat/ngắt kết nối
     client.data.userName = userName;
 
-    const result = this.roomService.joinRoom(cleanRoomId, client.id, userName);
+    const result = this.roomService.joinRoom(cleanRoomId, client.id, userName, clientId);
 
     // Xử lý khi phòng đã đủ 2 người
     if (!result.success && result.isFull) {
@@ -82,12 +87,24 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
+    // Nếu cùng tab vừa reconnect -> đóng gọn socket cũ đang treo để tránh bắn peer-left muộn
+    if (result.replacedSocketId) {
+      const staleSocket = this.server.sockets.sockets.get(result.replacedSocketId);
+      if (staleSocket) {
+        staleSocket.leave(cleanRoomId);
+        staleSocket.disconnect(true);
+      }
+      console.log(
+        `[SignalingGateway] Thay thế socket treo ${result.replacedSocketId} bằng ${client.id} trong phòng [${cleanRoomId}]`
+      );
+    }
+
     const participant = result.participant!;
     const room = result.room!;
 
     client.join(cleanRoomId);
     console.log(
-      `[SignalingGateway] ${client.id} (${userName}) vào phòng [${cleanRoomId}]. isPolite=${participant.isPolite}. Sĩ số: ${room.participants.size}/2`
+      `[SignalingGateway] ${client.id} (${userName}) vào phòng [${cleanRoomId}]. isPolite=${participant.isPolite}, epoch=${room.negotiationEpoch}. Sĩ số: ${room.participants.size}/2`
     );
 
     // Cung cấp danh sách các peer có sẵn cho người mới TRƯỚC khi báo cho peer cũ biết,
@@ -106,6 +123,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       roomId: cleanRoomId,
       yourId: client.id,
       isPolite: participant.isPolite,
+      epoch: room.negotiationEpoch,
       peers: existingPeers,
       whiteboard: room.whiteboard
     });
@@ -114,7 +132,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     client.to(cleanRoomId).emit('peer-joined', {
       peerId: client.id,
       peerName: userName,
-      isPolite: participant.isPolite
+      isPolite: participant.isPolite,
+      epoch: room.negotiationEpoch
     });
   }
 
@@ -130,6 +149,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       targetId?: string;
       offer: any;
       camerasMeta?: CameraMetaPayload[];
+      epoch?: number;
     }
   ) {
     const roomId = this.roomService.getRoomIdBySocketId(client.id);
@@ -139,7 +159,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       senderId: client.id,
       senderName: client.data.userName || 'Khách',
       offer: data.offer,
-      camerasMeta: data.camerasMeta
+      camerasMeta: data.camerasMeta,
+      epoch: data.epoch
     };
 
     if (data.targetId) {
@@ -161,6 +182,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       targetId?: string;
       answer: any;
       camerasMeta?: CameraMetaPayload[];
+      epoch?: number;
     }
   ) {
     const roomId = this.roomService.getRoomIdBySocketId(client.id);
@@ -170,7 +192,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       senderId: client.id,
       senderName: client.data.userName || 'Khách',
       answer: data.answer,
-      camerasMeta: data.camerasMeta
+      camerasMeta: data.camerasMeta,
+      epoch: data.epoch
     };
 
     if (data.targetId) {
@@ -187,14 +210,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('signal-ice-candidate')
   handleIceCandidate(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { targetId?: string; candidate: any }
+    @MessageBody() data: { targetId?: string; candidate: any; epoch?: number }
   ) {
     const roomId = this.roomService.getRoomIdBySocketId(client.id);
     if (!roomId) return;
 
     const payload = {
       senderId: client.id,
-      candidate: data.candidate
+      candidate: data.candidate,
+      epoch: data.epoch
     };
 
     if (data.targetId) {
@@ -202,6 +226,36 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     } else {
       client.to(roomId).emit('signal-ice-candidate', payload);
     }
+  }
+
+  /**
+   * SỰ KIỆN: 'signal-reconnect-relay'
+   * Đồng bộ cả 2 peer tạo lại RTCPeerConnection mới với epoch tăng nguyên tử
+   * (tránh hoàn toàn xung đột gói Offer/Answer/DTLS giữa phiên cũ và mới).
+   */
+  @SubscribeMessage('signal-reconnect-relay')
+  handleReconnectRelay(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { mode?: string; fromEpoch?: number }
+  ) {
+    const roomId = this.roomService.getRoomIdBySocketId(client.id);
+    if (!roomId) return;
+
+    const bumped = this.roomService.bumpNegotiationEpoch(roomId, data?.fromEpoch);
+    if (!bumped || !bumped.bumped) {
+      return;
+    }
+
+    const mode = data?.mode || 'relay-tls';
+    console.log(
+      `[SignalingGateway] Room [${roomId}] signal-reconnect-relay: mode=${mode}, epoch=${bumped.epoch} (by ${client.id})`
+    );
+
+    this.server.to(roomId).emit('signal-reconnect-relay', {
+      senderId: client.id,
+      mode,
+      epoch: bumped.epoch
+    });
   }
 
   /**

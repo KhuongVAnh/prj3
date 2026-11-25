@@ -10,8 +10,8 @@
  *  - Loại kết nối ICE Candidate pair (Host / Server Reflexive STUN / Relay TURN).
  */
 
-import React from 'react';
-import { X, Activity } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Activity, Copy, Check } from 'lucide-react';
 import { WebRTCStats } from '../types';
 
 interface StatsModalProps {
@@ -23,6 +23,8 @@ interface StatsModalProps {
   peerConnected: boolean;
   hasTurnServer?: boolean;
   iceConnectionState?: RTCIceConnectionState;
+  connectionState?: RTCPeerConnectionState;
+  debugLogs?: string[];
 }
 
 export const StatsModal: React.FC<StatsModalProps> = ({
@@ -33,29 +35,43 @@ export const StatsModal: React.FC<StatsModalProps> = ({
   isPolite,
   peerConnected,
   hasTurnServer = false,
-  iceConnectionState = 'new'
+  iceConnectionState = 'new',
+  connectionState = 'new',
+  debugLogs = []
 }) => {
+  const [copiedLogs, setCopiedLogs] = useState(false);
+
   if (!isOpen) return null;
 
-  const formatCandidateType = (type?: string) => {
+  const handleCopyLogs = () => {
+    const header = `Room=${roomId} | Role=${isPolite ? 'Polite' : 'Impolite'} | ICE=${iceConnectionState} | Conn=${connectionState} | TURN=${hasTurnServer}`;
+    const text = [header, ...debugLogs].join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedLogs(true);
+      setTimeout(() => setCopiedLogs(false), 2000);
+    }).catch(console.warn);
+  };
+
+  const formatCandidateType = (type?: string, protocol?: string) => {
     if (!type) return peerConnected ? 'Đang thiết lập...' : 'Chờ kết nối';
+    const protoSuffix = protocol ? ` (${protocol.toUpperCase()})` : '';
     switch (type) {
       case 'host':
-        return 'Host (Cùng mạng LAN)';
+        return `Host LAN${protoSuffix}`;
       case 'srflx':
-        return 'STUN Direct (P2P NAT)';
+        return `STUN Direct${protoSuffix}`;
       case 'prflx':
-        return 'Peer Reflexive (P2P)';
+        return `Peer Reflexive${protoSuffix}`;
       case 'relay':
-        return 'TURN Relay (Xuyên Firewall/4G)';
+        return `TURN Relay${protoSuffix}`;
       default:
-        return type;
+        return `${type}${protoSuffix}`;
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-primary/35 backdrop-blur-[2px] animate-fade-in">
-      <div className="relative w-full max-w-md rounded-2xl bg-surface border border-line-subtle shadow-card overflow-hidden animate-scale-in">
+      <div className="relative w-full max-w-lg max-h-[90dvh] flex flex-col rounded-2xl bg-surface border border-line-subtle shadow-card overflow-hidden animate-scale-in">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-line-subtle bg-surface">
           <div className="flex items-center gap-2.5">
@@ -76,7 +92,7 @@ export const StatsModal: React.FC<StatsModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4 bg-surface-subtle">
+        <div className="p-5 space-y-4 bg-surface-subtle overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
               <span className="text-xs text-ink-secondary block mb-1">Trạng thái</span>
@@ -95,16 +111,20 @@ export const StatsModal: React.FC<StatsModalProps> = ({
             <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
               <span className="text-xs text-ink-secondary block mb-1">Độ trễ RTT</span>
               <div className="text-sm font-semibold font-mono tabular-nums text-ink-primary">
-                {stats?.rtt ? `${stats.rtt} ms` : 'Dưới 5 ms'}
+                {stats && stats.rtt > 0
+                  ? `${stats.rtt} ms`
+                  : connectionState === 'connected'
+                  ? 'Dưới 5 ms'
+                  : 'Đang đo...'}
               </div>
             </div>
 
             <div className="p-3.5 rounded-xl bg-surface border border-line-subtle">
               <span className="text-xs text-ink-secondary block mb-1">Khung hình</span>
               <div className="text-sm font-semibold font-mono tabular-nums text-ink-primary">
-                {stats?.fps ? `${stats.fps} FPS` : '30 FPS'}{' '}
+                {stats?.fps ? `${stats.fps} FPS` : '—'}{' '}
                 <span className="text-xs font-normal text-ink-secondary">
-                  ({stats?.resolution || '720p'})
+                  {stats?.resolution ? `(${stats.resolution})` : ''}
                 </span>
               </div>
             </div>
@@ -147,8 +167,24 @@ export const StatsModal: React.FC<StatsModalProps> = ({
               </span>
             </div>
             <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
+              <span>Kết nối DTLS/Peer</span>
+              <span
+                className={`font-mono font-medium ${
+                  connectionState === 'connected'
+                    ? 'text-emerald-700'
+                    : connectionState === 'failed'
+                    ? 'text-red-600'
+                    : 'text-amber-700'
+                }`}
+              >
+                {stats?.dtlsState ? `${connectionState} (${stats.dtlsState})` : connectionState}
+              </span>
+            </div>
+            <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
               <span>Đường truyền</span>
-              <span className="font-mono text-ink-primary">{formatCandidateType(stats?.candidateType)}</span>
+              <span className="font-mono text-ink-primary">
+                {formatCandidateType(stats?.candidateType, stats?.candidateProtocol)}
+              </span>
             </div>
             <div className="flex justify-between items-center px-3.5 py-2.5 text-ink-secondary">
               <span>Máy chủ TURN</span>
@@ -163,6 +199,52 @@ export const StatsModal: React.FC<StatsModalProps> = ({
               Chưa cấu hình TURN Server. Kết nối trong cùng mạng hoặc NAT mở vẫn hoạt động bình thường, nhưng kết nối giữa WiFi và 4G hoặc mạng có tường lửa chặt có thể bị chặn.
             </div>
           )}
+
+          {/* Nhật ký WebRTC / Socket để chẩn đoán lỗi trên cả điện thoại */}
+          <div className="rounded-xl bg-surface border border-line-subtle overflow-hidden">
+            <div className="flex items-center justify-between px-3.5 py-2 border-b border-line-subtle">
+              <span className="text-xs font-medium text-ink-secondary">
+                Nhật ký kết nối ({debugLogs.length})
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyLogs}
+                className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover transition-colors"
+              >
+                {copiedLogs ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700">Đã chép</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Sao chép log</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="max-h-36 overflow-y-auto p-3 bg-surface-subtle font-mono text-[11px] leading-relaxed text-ink-secondary space-y-1 select-text">
+              {debugLogs.length === 0 ? (
+                <div className="text-ink-muted">Chưa có log kết nối.</div>
+              ) : (
+                debugLogs.map((line, idx) => (
+                  <div
+                    key={idx}
+                    className={
+                      line.includes('[ERR]')
+                        ? 'text-red-600 break-all'
+                        : line.includes('[WARN]')
+                        ? 'text-amber-700 break-all'
+                        : 'text-ink-primary break-all'
+                    }
+                  >
+                    {line}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
