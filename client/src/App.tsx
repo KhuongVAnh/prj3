@@ -27,12 +27,21 @@ function getRoomFromUrl(): string {
 export function App() {
   const [initialRoomId, setInitialRoomId] = useState<string>(() => getRoomFromUrl());
   const [currentConfig, setCurrentConfig] = useState<JoinConfig | null>(null);
+  // Đánh dấu người dùng vừa chủ động rời phòng -> khi quay lại Lobby sẽ tắt sẵn camera/mic preview
+  const [justLeftRoom, setJustLeftRoom] = useState<boolean>(false);
 
+  /**
+   * Lắng nghe nút Back của trình duyệt / thao tác vuốt quay lại trên điện thoại:
+   * Khi vào phòng ta gắn cờ { inRoom: true } vào History state; lúc người dùng bấm Back,
+   * state quay về trạng thái cũ (không có inRoom) -> lập tức unmount <Room /> để ngắt WebRTC ngay,
+   * kể cả trường hợp mở trực tiếp từ link mời đã có sẵn ?room=xxx trên URL.
+   */
   useEffect(() => {
-    const handlePopState = () => {
+    const handlePopState = (event: PopStateEvent) => {
       const roomFromUrl = getRoomFromUrl();
       setInitialRoomId(roomFromUrl);
-      if (!roomFromUrl) {
+      if (!event.state?.inRoom) {
+        setJustLeftRoom(true);
         setCurrentConfig(null);
       }
     };
@@ -40,6 +49,9 @@ export function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  /**
+   * Chuyển từ Sảnh chờ (Lobby) vào Phòng gọi (Room) và đẩy mốc lịch sử { inRoom: true }
+   */
   const handleJoinRoom = (
     roomId: string,
     userName: string,
@@ -48,9 +60,10 @@ export function App() {
   ) => {
     const url = new URL(window.location.href);
     url.searchParams.set('room', roomId);
-    window.history.pushState({}, '', url.toString());
+    window.history.pushState({ inRoom: true, roomId }, '', url.toString());
 
     setInitialRoomId(roomId);
+    setJustLeftRoom(false);
     setCurrentConfig({
       roomId,
       userName,
@@ -59,7 +72,14 @@ export function App() {
     });
   };
 
+  /**
+   * Rời phòng gọi: xóa trạng thái inRoom khỏi lịch sử hiện tại và quay về Lobby với cam/mic tắt sẵn
+   */
   const handleLeaveRoom = () => {
+    if (window.history.state?.inRoom) {
+      window.history.replaceState({ inRoom: false }, '', window.location.href);
+    }
+    setJustLeftRoom(true);
     setCurrentConfig(null);
   };
 
@@ -76,6 +96,7 @@ export function App() {
       ) : (
         <Lobby
           initialRoomId={initialRoomId}
+          startMediaOff={justLeftRoom}
           onJoinRoom={handleJoinRoom}
         />
       )}

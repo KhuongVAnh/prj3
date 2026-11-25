@@ -485,7 +485,52 @@ async function runSignalingTest() {
     p2.disconnect();
     p2Reconnected.disconnect();
 
-    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (12/12) ---');
+    // -------------------------------------------------------------
+    // [Test 13] POST /api/leave-room HTTP Beacon forces immediate peer-left
+    // -------------------------------------------------------------
+    console.log('[Test 13] Testing POST /api/leave-room HTTP beacon...');
+    const b1: ClientSocketType = ClientSocket(url);
+    const b2: ClientSocketType = ClientSocket(url);
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        b1.on('connect', () => b1.emit('join-room', { roomId: 'test-room-beacon', userName: 'BeaconHost', clientId: 'cid-b1' }));
+        b1.on('room-joined', () => resolve());
+        setTimeout(() => reject(new Error('b1 join timeout')), 3000);
+      }),
+      new Promise<void>((resolve, reject) => {
+        b2.on('connect', () => b2.emit('join-room', { roomId: 'test-room-beacon', userName: 'BeaconMobile', clientId: 'cid-b2' }));
+        b2.on('room-joined', () => resolve());
+        setTimeout(() => reject(new Error('b2 join timeout')), 3000);
+      })
+    ]);
+
+    await new Promise<void>((resolve, reject) => {
+      b1.once('peer-left', (data) => {
+        if (data.peerName === 'BeaconMobile') {
+          console.log('✓ HTTP Beacon /api/leave-room immediately triggered peer-left on remote peer');
+          resolve();
+        } else {
+          reject(new Error(`Unexpected peer-left from beacon: ${JSON.stringify(data)}`));
+        }
+      });
+
+      fetch(`${url}/api/leave-room`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          socketId: b2.id,
+          roomId: 'test-room-beacon',
+          clientId: 'cid-b2'
+        })
+      }).catch(reject);
+
+      setTimeout(() => reject(new Error('Beacon leave-room timeout')), 3000);
+    });
+
+    b1.disconnect();
+    b2.disconnect();
+
+    console.log('--- ALL NESTJS SIGNALING & MULTI-CAMERA TESTS PASSED (13/13) ---');
   } finally {
     await app.close();
   }

@@ -57,6 +57,20 @@ export class RoomService {
   }
 
   /**
+   * Tìm socketId hiện tại theo clientId trong một phòng (hỗ trợ beacon rời phòng khi đóng tab)
+   */
+  public findSocketIdByClientId(rawRoomId: string, clientId: string): string | null {
+    const room = this.getRoom(rawRoomId);
+    if (!room || !clientId) return null;
+    for (const [socketId, participant] of room.participants.entries()) {
+      if (participant.clientId === clientId) {
+        return socketId;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Thêm một người dùng mới vào phòng họp:
    */
   public joinRoom(
@@ -149,8 +163,10 @@ export class RoomService {
   }
 
   /**
-   * Tăng bộ đếm phiên đàm phán WebRTC (epoch) một cách nguyên tử trên server để
-   * đồng bộ cả 2 peer khi tạo lại RTCPeerConnection và loại bỏ yêu cầu trùng lặp.
+   * Tăng bộ đếm phiên đàm phán WebRTC (epoch) một cách nguyên tử trên server:
+   * - Nếu client gửi kèm fromEpoch < room.negotiationEpoch => nghĩa là bên kia đã nâng tầng trước rồi,
+   *   trả về bumped=false để server bỏ qua yêu cầu trùng lặp.
+   * - Ngược lại tăng negotiationEpoch lên 1 và trả về bumped=true để broadcast cho cả 2 peer cùng tạo lại PC.
    */
   public bumpNegotiationEpoch(
     roomId: string,

@@ -21,23 +21,60 @@ import {
 
 interface LobbyProps {
   initialRoomId: string;
+  /** true khi vừa rời phòng quay lại Lobby -> tắt sẵn cam & mic preview để không giữ phần cứng chạy nền */
+  startMediaOff?: boolean;
   onJoinRoom: (roomId: string, userName: string, initialAudio: boolean, initialVideo: boolean) => void;
 }
 
 const generateRandomRoomCode = () =>
   `meet-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
 
-export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
+export const Lobby: React.FC<LobbyProps> = ({
+  initialRoomId,
+  startMediaOff = false,
+  onJoinRoom
+}) => {
   const [roomId, setRoomId] = useState(() => initialRoomId || generateRandomRoomCode());
   const [userName, setUserName] = useState('');
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  // Nếu vừa thoát phòng (startMediaOff=true) thì để sẵn tắt mic/cam, tránh bật lại webcam ngay lập tức
+  const [isAudioEnabled, setIsAudioEnabled] = useState(!startMediaOff);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(!startMediaOff);
+  // Theo dõi tab Lobby có đang hiển thị hay bị ẩn/thoát Chrome để tự nhả camera/micro
+  const [isTabVisible, setIsTabVisible] = useState<boolean>(() =>
+    typeof document === 'undefined' ? true : document.visibilityState === 'visible'
+  );
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [deviceError, setDeviceError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Ref giữ stream preview mới nhất để dọn sạch track kể cả bên trong event listener pagehide
+  const previewStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  /**
+   * Khi người dùng ẩn tab Lobby hoặc đóng trình duyệt:
+   * lập tức tắt toàn bộ track preview để giải phóng camera/micro (đặc biệt trên điện thoại).
+   */
+  useEffect(() => {
+    const handleVisibility = () => {
+      setIsTabVisible(document.visibilityState === 'visible');
+    };
+    const handlePageHide = () => {
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getTracks().forEach(t => t.stop());
+        previewStreamRef.current = null;
+      }
+      setPreviewStream(null);
+      setIsTabVisible(false);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, []);
 
   useEffect(() => {
     const savedName = localStorage.getItem('omnicam_user_name');
@@ -67,10 +104,18 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     }
 
     const setupPreview = async () => {
-      if (previewStream) {
-        previewStream.getTracks().forEach(t => t.stop());
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getTracks().forEach(t => t.stop());
+        previewStreamRef.current = null;
       }
       setDeviceError(null);
+
+      // Khi tab Lobby bị ẩn hoặc thoát Chrome -> giải phóng 100% camera/micro ngay
+      if (!isTabVisible) {
+        setPreviewStream(null);
+        setAudioLevel(0);
+        return;
+      }
 
       if (isVideoEnabled || isAudioEnabled) {
         try {
@@ -91,6 +136,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
             return;
           }
 
+          previewStreamRef.current = stream;
           setPreviewStream(stream);
 
           if (isAudioEnabled && stream.getAudioTracks().length > 0) {
@@ -143,12 +189,15 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
       }
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
+        if (previewStreamRef.current === stream) {
+          previewStreamRef.current = null;
+        }
       }
     };
-  }, [isVideoEnabled, isAudioEnabled]);
+  }, [isVideoEnabled, isAudioEnabled, isTabVisible]);
 
   useEffect(() => {
-    if (videoRef.current && previewStream) {
+    if (videoRef.current) {
       videoRef.current.srcObject = previewStream;
     }
   }, [previewStream]);

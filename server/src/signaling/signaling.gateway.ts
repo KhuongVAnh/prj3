@@ -34,8 +34,9 @@ import {
     origin: '*',
     methods: ['GET', 'POST']
   },
-  pingInterval: 20000,
-  pingTimeout: 20000
+  // Heartbeat 10s + timeout 10s => phát hiện rớt mạng 4G tối đa ~20s để cắt sớm luồng TURN phía đối diện
+  pingInterval: 10000,
+  pingTimeout: 10000
 })
 export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -487,6 +488,74 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('leave-room')
   handleLeaveRoom(@ConnectedSocket() client: Socket) {
     this.processLeave(client);
+  }
+
+  /**
+   * Dọn dẹp cưỡng bức khi client đóng tab/app và bắn HTTP Beacon (/api/leave-room).
+   * Luồng xử lý:
+   *  1. Xác định socketId cần xóa (ưu tiên socketId gửi lên; nếu thiếu thì dò theo clientId trong phòng).
+   *  2. Nếu socket vẫn đang sống trên server -> gọi processLeave() và disconnect(true) ngay lập tức.
+   *  3. Nếu socket đã rơi khỏi danh sách live nhưng vẫn còn trong RoomService -> xóa khỏi phòng
+   *     và phát thẳng 'peer-left' (cùng trạng thái whiteboard nếu cần) để máy đối diện cắt video TURN.
+   * Hàm có tính idempotent (gọi lặp lại sẽ trả về false và bỏ qua an toàn).
+   */
+  public forceLeaveByBeacon(params: {
+    socketId?: string;
+    roomId?: string;
+    clientId?: string;
+  }): boolean {
+    // Bước 1: Tìm socketId mục tiêu (hỗ trợ fallback theo clientId nếu socket chưa kịp có id)
+    let targetSocketId = params.socketId?.trim() || '';
+    if (!targetSocketId && params.roomId && params.clientId) {
+      targetSocketId =
+        this.roomService.findSocketIdByClientId(params.roomId, params.clientId.trim()) || '';
+    }
+    if (!targetSocketId) return false;
+
+    // Bước 2: Nếu socket vẫn đang giữ kết nối trên server -> ngắt sạch theo luồng chuẩn
+    const liveSocket = this.server?.sockets?.sockets?.get(targetSocketId);
+    if (liveSocket) {
+      this.processLeave(liveSocket);
+      liveSocket.disconnect(true);
+      return true;
+    }
+
+    // Bước 3: Fallback nếu socket đã biến mất nhưng dữ liệu thành viên vẫn còn lưu trong phòng
+    const roomId =
+      this.roomService.getRoomIdBySocketId(targetSocketId) ||
+      (params.roomId ? this.roomService.sanitizeRoomId(params.roomId) : null);
+    if (!roomId) return false;
+
+    const { removed, remainingCount, peerName, whiteboardClosed } = this.roomService.leaveRoom(
+      roomId,
+      targetSocketId
+    );
+    if (!removed) return false;
+
+    console.log(
+      `[SignalingGateway] Beacon rời phòng: ${targetSocketId} (${peerName}) khỏi [${roomId}]. Còn lại: ${remainingCount}`
+    );
+
+    // Giải phóng quyền bảng trắng nếu người rời phòng đang giữ quyền mở bảng
+    if (whiteboardClosed) {
+      const room = this.roomService.getRoom(roomId);
+      if (room) {
+        this.server.to(roomId).emit('whiteboard-state-updated', {
+          isOpen: false,
+          ownerId: null,
+          ownerName: null,
+          showGrid: room.whiteboard.showGrid,
+          strokes: room.whiteboard.strokes
+        });
+      }
+    }
+
+    // Báo ngay cho người còn lại trong phòng để đóng RTCPeerConnection & ngừng gửi video
+    this.server.to(roomId).emit('peer-left', {
+      peerId: targetSocketId,
+      peerName: peerName || 'Khách'
+    });
+    return true;
   }
 
   /**

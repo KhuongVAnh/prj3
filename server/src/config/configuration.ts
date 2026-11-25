@@ -16,9 +16,9 @@ export const SERVER_CONFIG = {
   // Số lượng người tham gia tối đa trong 1 phòng gọi 1-1
   MAX_PARTICIPANTS_PER_ROOM: 2,
 
-  // WebSocket Heartbeat keep-alive (tăng ngưỡng chịu tải cho mạng 4G / proxy)
-  SOCKET_PING_INTERVAL: 20000,
-  SOCKET_PING_TIMEOUT: 20000,
+  // WebSocket Heartbeat keep-alive (phát hiện mất sóng 4G nhanh tối đa ~20s thay vì 40s)
+  SOCKET_PING_INTERVAL: 10000,
+  SOCKET_PING_TIMEOUT: 10000,
 
   // CORS Origin
   CORS_ORIGIN: '*'
